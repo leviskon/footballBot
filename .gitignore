@@ -1,0 +1,12 @@
+# secrets
+.env
+
+# runtime data
+data/
+logs/
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/

@@ -1,0 +1,142 @@
+{
+ "events": [
+  {
+   "id": "401878765",
+   "date": "2026-10-25T14:00Z",
+   "name": "Brighton & Hove Albion at Liverpool",
+   "status": {
+    "displayClock": "90'+5'",
+    "type": {
+     "name": "STATUS_FULL_TIME",
+     "state": "post",
+     "completed": true,
+     "detail": "FT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "shootoutScore": null,
+       "winner": true,
+       "team": {
+        "id": "364",
+        "displayName": "Liverpool"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "shootoutScore": null,
+       "winner": false,
+       "team": {
+        "id": "331",
+        "displayName": "Brighton & Hove Albion"
+       }
+      }
+     ],
+     "details": [
+      {
+       "type": {
+        "id": "97",
+        "text": "Own Goal"
+       },
+       "clock": {
+        "displayValue": "17'"
+       },
+       "team": {
+        "id": "364"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": true,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Pascal Gross"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "173",
+        "text": "Goal - Volley"
+       },
+       "clock": {
+        "displayValue": "21'"
+       },
+       "team": {
+        "id": "364"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Alexander Isak"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "45'+3'"
+       },
+       "team": {
+        "id": "331"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Olivier Boscagli"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "73'"
+       },
+       "team": {
+        "id": "331"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Costinha"
+        }
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Anfield"
+     },
+     "notes": []
+    }
+   ]
+  }
+ ]
+}

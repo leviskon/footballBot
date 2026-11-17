@@ -1,0 +1,10 @@
+[project]
+name = "football-news-bot"
+version = "1.0.0"
+description = "Telegram bot that collects football news from open sources for a channel editor"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

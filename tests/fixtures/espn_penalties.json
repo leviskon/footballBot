@@ -1,0 +1,719 @@
+{
+ "events": [
+  {
+   "id": "723737",
+   "date": "2025-06-08T13:00Z",
+   "name": "France at Germany",
+   "status": {
+    "displayClock": "90'+7'",
+    "type": {
+     "name": "STATUS_FULL_TIME",
+     "state": "post",
+     "completed": true,
+     "detail": "FT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "shootoutScore": null,
+       "winner": false,
+       "team": {
+        "id": "481",
+        "displayName": "Germany"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "shootoutScore": null,
+       "winner": true,
+       "team": {
+        "id": "478",
+        "displayName": "France"
+       }
+      }
+     ],
+     "details": [
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "12'"
+       },
+       "team": {
+        "id": "478"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Lucas Digne"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "29'"
+       },
+       "team": {
+        "id": "481"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "David Raum"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "35'"
+       },
+       "team": {
+        "id": "481"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Karim Adeyemi"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "70",
+        "text": "Goal"
+       },
+       "clock": {
+        "displayValue": "45'"
+       },
+       "team": {
+        "id": "478"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Kylian Mbappé"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "61'"
+       },
+       "team": {
+        "id": "478"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Lucas Hernández"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "61'"
+       },
+       "team": {
+        "id": "481"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Jonathan Tah"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "70",
+        "text": "Goal"
+       },
+       "clock": {
+        "displayValue": "84'"
+       },
+       "team": {
+        "id": "478"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Michael Olise"
+        }
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "MHPArena"
+     },
+     "notes": []
+    }
+   ]
+  },
+  {
+   "id": "723738",
+   "date": "2025-06-08T19:00Z",
+   "name": "Spain at Portugal",
+   "status": {
+    "displayClock": "120'",
+    "type": {
+     "name": "STATUS_FINAL_PEN",
+     "state": "post",
+     "completed": true,
+     "detail": "FT-Pens"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "shootoutScore": 5,
+       "winner": true,
+       "team": {
+        "id": "482",
+        "displayName": "Portugal"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "shootoutScore": 3,
+       "winner": false,
+       "team": {
+        "id": "164",
+        "displayName": "Spain"
+       }
+      }
+     ],
+     "details": [
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "19'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Gonçalo Inácio"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "70",
+        "text": "Goal"
+       },
+       "clock": {
+        "displayValue": "21'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Martín Zubimendi"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "70",
+        "text": "Goal"
+       },
+       "clock": {
+        "displayValue": "26'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Nuno Mendes"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "33'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Fabián Ruiz"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "70",
+        "text": "Goal"
+       },
+       "clock": {
+        "displayValue": "45'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Mikel Oyarzabal"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "173",
+        "text": "Goal - Volley"
+       },
+       "clock": {
+        "displayValue": "61'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Cristiano Ronaldo"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "82'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Pedro Neto"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "90'+1'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Robin Le Normand"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "100'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Nuno Mendes"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "100'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Álex Baena"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "110'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": [
+        {
+         "displayName": "Pedro Porro"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "94",
+        "text": "Yellow Card"
+       },
+       "clock": {
+        "displayValue": "110'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": false,
+       "redCard": false,
+       "yellowCard": true,
+       "penaltyKick": false,
+       "ownGoal": false,
+       "shootout": false,
+       "athletesInvolved": []
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Gonçalo Ramos"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Mikel Merino"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Vitinha"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Álex Baena"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Bruno Fernandes"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "164"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Isco"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Nuno Mendes"
+        }
+       ]
+      },
+      {
+       "type": {
+        "id": "104",
+        "text": "Penalty - Scored"
+       },
+       "clock": {
+        "displayValue": "120'"
+       },
+       "team": {
+        "id": "482"
+       },
+       "scoringPlay": true,
+       "redCard": false,
+       "yellowCard": false,
+       "penaltyKick": true,
+       "ownGoal": false,
+       "shootout": true,
+       "athletesInvolved": [
+        {
+         "displayName": "Rúben Neves"
+        }
+       ]
+      }
+     ],
+     "venue": {
+      "fullName": "Allianz Arena"
+     },
+     "notes": [
+      {
+       "text": "Portugal win 5-3 on penalties",
+       "headline": "Portugal win 5-3 on penalties",
+       "type": "event"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
