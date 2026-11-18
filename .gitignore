@@ -10,3 +10,9 @@ logs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# deploy.bat settings (server IP, key path)
+.deploy.json
+# SSH keys (e.g. the one downloaded from Oracle Cloud)
+*.key
+*.pem

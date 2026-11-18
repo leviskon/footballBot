@@ -33,6 +33,8 @@ from .storage import NewsRecord, Storage
 log = logging.getLogger(__name__)
 
 MINUTE_LOOP_SEC = 60
+# Exit code when Telegram rejects the token; the systemd unit does not restart on it.
+EXIT_BAD_TOKEN = 3
 NEWS_RETENTION_DAYS = 14
 MATCH_RETENTION_DAYS = 30
 _PRUNED_KEY = "pruned_on"
@@ -282,7 +284,7 @@ async def run(config: Config) -> int:
             log.info("Telegram через прокси %s", config.telegram_proxy.split("@")[-1])
         me = await connect(bot, config)
         if me is None:
-            return 1
+            return EXIT_BAD_TOKEN
 
         app = App(config, bot, db, http)
         app.bot_username = me.username or ""
