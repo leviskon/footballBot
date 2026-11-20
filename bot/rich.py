@@ -5,7 +5,7 @@ quotes (long ones collapsed), a table, the channel signature as a footer and col
 buttons. The LLM writes plain text; it is turned into rich HTML here.
 
 News post:   photo (with the licence credit, if any) → heading → paragraphs/quotes → footer
-             → «🔗 Источник» button.
+             (→ «🔗 Источник» button, if switched on in .env).
 Match post:  result card → heading → paragraphs → table of goals and red cards → date
              (shown in every reader's own time zone) and stadium → footer → «📊 Статистика».
 """
@@ -27,6 +27,9 @@ from .textutil import esc
 
 PHOTO_ID = "hero"
 LONG_QUOTE = 250  # quotes longer than this are collapsed («expandable»)
+# Rich messages have no margins: an empty line is a paragraph with a no-break space (an
+# empty <p> is dropped by Telegram).
+SPACER = "<p>&nbsp;</p>"
 ESPN_MATCH_URL = "https://www.espn.com/soccer/match/_/gameId/{id}"
 
 # «Текст цитаты» — Автор   /   "Quote" - Author
@@ -67,7 +70,14 @@ def _photo(with_photo: bool, credit: str) -> str:
 
 
 def _footer(signature: str) -> str:
-    return "".join(f"<footer>{esc(line)}</footer>" for line in signature.splitlines() if line.strip())
+    """The channel signature, set apart from the text by an empty line."""
+    lines = [f"<footer>{esc(line)}</footer>" for line in signature.splitlines() if line.strip()]
+    return SPACER + "".join(lines) if lines else ""
+
+
+def _heading(headline: str) -> str:
+    """The headline with an empty line under it, like a blank line in a plain post."""
+    return f"<h2>{esc(headline)}</h2>{SPACER}"
 
 
 def _buttons(buttons: Sequence[tuple[str, str, str | None]]) -> str:
@@ -84,7 +94,7 @@ def news_html(post: str, *, signature: str = "", with_photo: bool = False, credi
               source: tuple[str, str] | None = None) -> str:
     """A news post. ``source`` is ``(site name, article url)`` for the «🔗» button."""
     headline, paragraphs = _split(post)
-    parts = [_photo(with_photo, credit), f"<h2>{esc(headline)}</h2>"]
+    parts = [_photo(with_photo, credit), _heading(headline)]
     parts += [_paragraph(lines) for lines in paragraphs]
     parts.append(_footer(signature))
     if source:
@@ -105,7 +115,7 @@ def match_html(post: str, match: Match, league: Category,
                signature: str = "", with_photo: bool = True) -> str:
     """A match-result post with a table of goals and red cards."""
     headline, paragraphs = _split(post)
-    parts = [_photo(with_photo, ""), f"<h2>{esc(headline)}</h2>"]
+    parts = [_photo(with_photo, ""), _heading(headline)]
     parts += [_paragraph(lines) for lines in paragraphs]
 
     home, away = team_name(match.home.name), team_name(match.away.name)

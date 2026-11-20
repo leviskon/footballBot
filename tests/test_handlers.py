@@ -108,7 +108,7 @@ def make_app(*, fail=False, photo=b"\xff\xd8jpeg", related=None, credit=False, c
 
     return SimpleNamespace(writer=Writer(), db=Db(), photos=Photos(), cards=None, matches=None,
                            channel=channel,
-                           config=SimpleNamespace(post_signature="⚽️ FUTERA", post_source_button=True,
+                           config=SimpleNamespace(post_signature="⚽️ FUTERA", post_source_button=False,
                                                   tz=None))
 
 
@@ -120,8 +120,8 @@ def test_news_post_is_a_rich_message_rewritten_in_place():
     assert placeholder.deleted
     assert post.rich_photo.filename == "photo.jpg"
     assert post.rich_html.startswith('<img src="tg://photo?id=hero"><h2>🚨 ВАРИАНТ 1</h2>')
-    assert "<footer>⚽️ FUTERA</footer>" in post.rich_html
-    assert 'url="https://ru.example/1"' in post.rich_html  # «🔗 Источник» button
+    assert "<p>&nbsp;</p><footer>⚽️ FUTERA</footer>" in post.rich_html
+    assert "<tg-button" not in post.rich_html  # no «🔗 Источник» button unless switched on
     assert NewsAction.unpack(post.markup.inline_keyboard[0][0].callback_data) == \
         NewsAction(action="repost", item="n1")
 

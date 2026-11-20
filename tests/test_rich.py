@@ -13,17 +13,18 @@ def test_news_html_structure_and_escaping():
     html = news_html(post, signature="⚽️ FUTERA | Футбол\n📷 автор", with_photo=True,
                      credit="📷 Zafer / Wikimedia", source=("Чемпионат", "https://x.example/a?b=1&c=2"))
     assert html.startswith('<figure><img src="tg://photo?id=hero"><figcaption>📷 Zafer / Wikimedia'
-                           "</figcaption></figure><h2>❗️ «РЕАЛ» &amp; «БАРСЕЛОНА» &lt;СПОРЯТ&gt;</h2>")
+                           "</figcaption></figure><h2>❗️ «РЕАЛ» &amp; «БАРСЕЛОНА» &lt;СПОРЯТ&gt;</h2>"
+                           "<p>&nbsp;</p>")
     assert "<p>Первый абзац.</p><p>Вторая строка.</p>" in html
     assert "<blockquote><p>«Короткая цитата»</p><cite>Моуринью</cite></blockquote>" in html
     assert "<blockquote expandable>«Очень длинная цитата." in html
-    assert "<footer>⚽️ FUTERA | Футбол</footer><footer>📷 автор</footer>" in html
+    assert "<p>&nbsp;</p><footer>⚽️ FUTERA | Футбол</footer><footer>📷 автор</footer>" in html
     assert 'url="https://x.example/a?b=1&amp;c=2"' in html and "🔗 Источник: Чемпионат" in html
 
 
 def test_news_html_without_photo_or_source():
     html = news_html("ЗАГОЛОВОК\nТекст")
-    assert html == "<h2>ЗАГОЛОВОК</h2><p>Текст</p>"
+    assert html == "<h2>ЗАГОЛОВОК</h2><p>&nbsp;</p><p>Текст</p>"
 
 
 def test_match_html_has_a_goal_table_and_local_time():

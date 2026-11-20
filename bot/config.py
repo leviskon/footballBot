@@ -43,7 +43,7 @@ class Config:
     post_signature: str = ""
     card_brand: str = ""
     channel_id: int | str | None = None  # «@username» or «-100…»
-    post_source_button: bool = True  # «🔗 Источник» button under news posts
+    post_source_button: bool = False  # «🔗 Источник» button under news posts
 
 
 def _env(name: str) -> str:
@@ -190,5 +190,5 @@ def load_config(*, require_token: bool = True) -> Config:
         post_signature=_env("POST_SIGNATURE").replace("\\n", "\n"),
         card_brand=_env("CARD_BRAND"),
         channel_id=_parse_channel(_env("CHANNEL_ID")),
-        post_source_button=_env("POST_SOURCE_BUTTON").lower() not in ("0", "no", "false", "нет"),
+        post_source_button=_env("POST_SOURCE_BUTTON").lower() in ("1", "yes", "true", "да"),
     )
