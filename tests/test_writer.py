@@ -157,3 +157,49 @@ def test_feed_picture_is_the_fallback():
     post = asyncio.run(PostWriter(FakeHttp(broken=True), [FakeProvider("A", answer="ПОСТ")])
                        .news_post(record))
     assert post.images == ("https://img.example/feed.jpg",)
+
+
+class SlowProvider(FakeProvider):
+    def __init__(self, name, answer, delay):
+        super().__init__(name, answer=answer)
+        self.delay = delay
+        self.cancelled = False
+
+    async def generate(self, system, prompt):
+        self.prompts.append(prompt)
+        try:
+            await asyncio.sleep(self.delay)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return self.answer
+
+
+def test_slow_provider_gets_company(monkeypatch):
+    import time
+
+    import bot.writer
+
+    monkeypatch.setattr(bot.writer, "HEDGE_SEC", 0.1)
+    slow = SlowProvider("Slow", "МЕДЛЕННЫЙ ПОСТ", delay=2)
+    quick = SlowProvider("Quick", "БЫСТРЫЙ ПОСТ", delay=0.05)
+    writer = PostWriter(FakeHttp(), [slow, quick])
+
+    async def scenario():
+        started = time.monotonic()
+        post = await writer.news_post(RECORD)
+        return post, time.monotonic() - started
+
+    post, took = asyncio.run(scenario())
+    assert post.text == "БЫСТРЫЙ ПОСТ" and took < 1
+    assert slow.cancelled  # the loser of the race is not left running
+
+
+def test_quick_answer_asks_nobody_else(monkeypatch):
+    import bot.writer
+
+    monkeypatch.setattr(bot.writer, "HEDGE_SEC", 0.5)
+    first = SlowProvider("First", "ПОСТ", delay=0.01)
+    second = SlowProvider("Second", "ДРУГОЙ", delay=0.01)
+    assert asyncio.run(PostWriter(FakeHttp(), [first, second]).news_post(RECORD)).text == "ПОСТ"
+    assert second.prompts == []

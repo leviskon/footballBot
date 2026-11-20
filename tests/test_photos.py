@@ -173,3 +173,20 @@ def test_one_glitch_does_not_block_a_host(tmp_path):
         await db.close()
 
     asyncio.run(scenario())
+
+
+def test_article_page_picture_comes_first(tmp_path):
+    class PageHttp(FakeHttp):
+        async def fetch_text(self, url, *, timeout=None):
+            return '<meta property="og:image" content="https://img.example/page.jpg">'
+
+    async def scenario():
+        db = await Storage.open(tmp_path / "t.sqlite3")
+        record = story("a", "sportsru", "«Реал» продлил контракт", image="https://img.example/rss.jpg")
+        http = PageHttp({"https://img.example/page.jpg": jpeg_source(),
+                         "https://img.example/rss.jpg": jpeg_source()})
+        assert await PhotoFinder(http, db).for_news(record) is not None
+        assert http.requested == ["https://img.example/page.jpg"]
+        await db.close()
+
+    asyncio.run(scenario())

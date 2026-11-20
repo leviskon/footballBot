@@ -75,7 +75,7 @@ def make_app(*, fail=False, photo=b"\xff\xd8jpeg", related=None, credit=False):
             return RECORD if news_id == "n1" else None
 
     class Photos:
-        async def for_news(self, record, images):
+        async def for_news(self, record, images=None):
             data = photo or related
             return Picture(data, "📷 Zafer / Wikimedia Commons, CC BY 4.0" if credit else "") \
                 if data else None

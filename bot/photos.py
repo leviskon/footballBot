@@ -263,8 +263,22 @@ class PhotoFinder:
 
     # ------------------------------------------------------------------ chain
 
-    async def for_news(self, record: NewsRecord, images: Sequence[str]) -> Picture | None:
-        """The best available picture for a news post (see the module docstring)."""
+    async def for_news(self, record: NewsRecord, images: Sequence[str] | None = None
+                       ) -> Picture | None:
+        """The best available picture for a news post (see the module docstring).
+
+        ``images`` are the article's own pictures; without them the article page is read
+        here, so the search can run while the post is being written."""
+        if images is None:
+            images = [record.image] if record.image else []
+            if self._host_ok(record.url):
+                try:
+                    html = await self._http.fetch_text(record.url, timeout=TIMEOUT_SEC)
+                    page_image = extract_image(html, record.url)
+                    if page_image:
+                        images.insert(0, page_image)  # the page's picture is the main one
+                except FetchError:
+                    pass
         for url in images:
             photo = await self.download(url)
             if photo:

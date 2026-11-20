@@ -8,6 +8,7 @@ quota or unreachable, the next one is used.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -28,6 +29,8 @@ log = logging.getLogger(__name__)
 
 # An overloaded model is skipped quickly, so the next one still answers within a minute.
 LLM_TIMEOUT_SEC = 25
+# A provider silent for this long gets company: the next one is asked in parallel.
+HEDGE_SEC = 10
 ARTICLE_TIMEOUT_SEC = 15
 # A model that failed is skipped for a while, so the next posts do not wait for it again.
 COOLDOWN_SEC = 5 * 60
@@ -351,22 +354,55 @@ class PostWriter:
         return ready + [p for p in self._providers if p not in ready]
 
     async def _generate(self, prompt: str, system: str = STYLE, *, raw: bool = False) -> str:
+        """Ask the providers in order and return the first usable answer.
+
+        A provider that fails hands over to the next one at once. One that is merely slow
+        (free models often are at busy hours) gets ``HEDGE_SEC``; then the next provider is
+        asked in parallel and whichever answers first wins, the rest are cancelled.
+        """
+        order = self._order()
         errors: list[str] = []
-        for provider in self._order():
-            try:
-                answer = await provider.generate(system, prompt)
-                post = answer.strip() if raw else clean_post(answer)
-            except (LLMError, FetchError) as exc:
-                log.warning("%s не написал пост: %s", provider.name, exc)
-                errors.append(f"{provider.name}: {exc}")
-                quota = isinstance(exc, LLMError) and exc.quota
-                self._resting[provider.name] = time.monotonic() + (
-                    QUOTA_COOLDOWN_SEC if quota else COOLDOWN_SEC)
-                continue
-            if post:
-                self._resting.pop(provider.name, None)
-                return post
-            errors.append(f"{provider.name}: пустой ответ")
+        running: dict[asyncio.Task[str], Provider] = {}
+        asked = 0
+
+        def ask_next() -> None:
+            nonlocal asked
+            provider = order[asked]
+            asked += 1
+            running[asyncio.create_task(provider.generate(system, prompt))] = provider
+
+        ask_next()
+        try:
+            while running:
+                more = asked < len(order)
+                done, _ = await asyncio.wait(running, timeout=HEDGE_SEC if more else None,
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    log.info("%s отвечает медленно — спрашиваю ещё и %s",
+                             ", ".join(p.name for p in running.values()), order[asked].name)
+                    ask_next()
+                    continue
+                for task in done:
+                    provider = running.pop(task)
+                    try:
+                        answer = task.result()
+                        post = answer.strip() if raw else clean_post(answer)
+                    except (LLMError, FetchError) as exc:
+                        log.warning("%s не написал пост: %s", provider.name, exc)
+                        errors.append(f"{provider.name}: {exc}")
+                        quota = isinstance(exc, LLMError) and exc.quota
+                        self._resting[provider.name] = time.monotonic() + (
+                            QUOTA_COOLDOWN_SEC if quota else COOLDOWN_SEC)
+                        continue
+                    if post:
+                        self._resting.pop(provider.name, None)
+                        return post
+                    errors.append(f"{provider.name}: пустой ответ")
+                if not running and asked < len(order):
+                    ask_next()
+        finally:
+            for task in running:  # slower providers that lost the race
+                task.cancel()
         raise LLMError("; ".join(errors))
 
     async def news_post(self, record: NewsRecord) -> Post:

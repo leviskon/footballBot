@@ -6,6 +6,7 @@ The menu buttons are the main interface. Slash commands stay as hidden aliases
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from typing import TYPE_CHECKING
@@ -276,15 +277,23 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
             await _set_text(target, "✍️ Пишу другой вариант…")
         else:
             target = await message.reply("✍️ Пишу пост, это займёт до минуты…")
+        # the picture is looked for while the text is being written
+        photo_task = None
+        if record is not None and not regenerate:
+            photo_task = asyncio.create_task(app.photos.for_news(record))
         try:
             post = await write()
         except LLMError as exc:
+            if photo_task is not None:
+                photo_task.cancel()
             log.warning("Не удалось написать пост: %s", exc)
             await _set_text(target, "⚠️ Не получилось написать пост: нейросети сейчас "
                             "перегружены или закончился бесплатный лимит. Попробуй через "
                             "пару минут.", keyboard)
             return
         except Exception:
+            if photo_task is not None:
+                photo_task.cancel()
             log.exception("Ошибка при написании поста")
             await _set_text(target, "⚠️ Не получилось написать пост из-за ошибки. "
                             "Подробности — в logs/bot.log", keyboard)
@@ -299,7 +308,7 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
             await _set_text(target, text, keyboard)
             return
 
-        photo, credit = await _post_picture(app, post, match_info, message, record)
+        photo, credit = await _post_picture(app, match_info, message, photo_task)
         if photo is not None:
             try:
                 await message.reply_photo(
@@ -316,15 +325,16 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         _writing.discard(key)
 
 
-async def _post_picture(app: App, post: Post, match_info, message: Message,
-                        record: NewsRecord | None) -> tuple[BufferedInputFile | str | None, str]:
-    """``(picture, credit)``: a photo for a news post (see :mod:`bot.photos`), the result card
-    for a match post. The credit is the attribution a free licence requires, or empty."""
+async def _post_picture(app: App, match_info, message: Message,
+                        photo_task: asyncio.Task | None
+                        ) -> tuple[BufferedInputFile | str | None, str]:
+    """``(picture, credit)``: the photo found for a news post (see :mod:`bot.photos`), the
+    result card for a match post. The credit is the attribution a free licence requires."""
     try:
         if match_info is not None:
             return BufferedInputFile(await app.cards.make(*match_info), "result.jpg"), ""
-        if record is not None:
-            picture = await app.photos.for_news(record, post.images)
+        if photo_task is not None:
+            picture = await photo_task
             if picture is None:
                 return None, ""
             return BufferedInputFile(picture.data, "photo.jpg"), picture.credit
