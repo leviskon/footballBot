@@ -15,7 +15,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramUnauthorizedError
-from aiogram.types import BotCommand, User
+from aiogram.types import BotCommand, InlineKeyboardMarkup, User
 
 from .access import Access
 from .classifier import Classifier
@@ -26,9 +26,10 @@ from .net import HttpClient
 from .news import MAX_DELIVERY_ATTEMPTS, CycleReport, NewsCollector
 from .notifier import DeliveryError, Notifier
 from .render import render_day, render_news, render_result
-from .keyboards import news_keyboard
+from .keyboards import match_keyboard, news_keyboard
 from .settings import SettingsStore
 from .storage import NewsRecord, Storage
+from .writer import GeminiProvider, GroqProvider, PostWriter, Provider
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class App:
         self.matches = MatchService(EspnClient(http), db, self.settings, tz=config.tz,
                                     interval=config.matches_interval,
                                     digest_time=config.digest_time)
+        self.writer = make_writer(config, http)
         self.started_at = time.time()
         self.bot_username = ""
         self._news_lock = asyncio.Lock()
@@ -75,12 +77,20 @@ class App:
     async def _send_record(self, record: NewsRecord) -> bool:
         return await self.notifier.broadcast(
             render_news(record, self.config.tz),
-            keyboard=news_keyboard(record.id, record.url),
+            keyboard=self.news_keyboard(record.id, record.url),
             preview_url=record.url,
         )
 
+    def news_keyboard(self, item_id: str, url: str, *,
+                      taken: bool = False) -> InlineKeyboardMarkup:
+        return news_keyboard(item_id, url, taken=taken, post=self.writer is not None)
+
     async def _send_text(self, text: str) -> bool:
         return await self.notifier.broadcast(text)
+
+    async def _send_result(self, text: str) -> bool:
+        keyboard = match_keyboard() if self.writer is not None else None
+        return await self.notifier.broadcast(text, keyboard=keyboard)
 
     async def send_latest(self, chat_id: int, count: int) -> int:
         """Send up to ``count`` of the freshest stories that were never sent before.
@@ -98,7 +108,7 @@ class App:
             for record in reversed(records):  # oldest first, so the newest ends up at the bottom
                 delivered = await self.notifier.send(
                     chat_id, render_news(record, self.config.tz),
-                    keyboard=news_keyboard(record.id, record.url), preview_url=record.url)
+                    keyboard=self.news_keyboard(record.id, record.url), preview_url=record.url)
                 if delivered:
                     await self.db.mark_news_sent(record.id, int(time.time()))
                     sent += 1
@@ -131,7 +141,7 @@ class App:
     async def results_cycle(self, *, force: bool = False) -> int:
         async with self._results_lock:
             try:
-                sent = await self.matches.poll_results(self._send_text, render_result, force=force)
+                sent = await self.matches.poll_results(self._send_result, render_result, force=force)
             except DeliveryError as exc:
                 log.warning("Telegram недоступен (%s) — результаты отправлю позже", exc)
                 return 0
@@ -236,10 +246,25 @@ class App:
         self.start_background()
         if self.access.recipients:
             log.info("Получатели: %s", ", ".join(map(str, self.access.recipients)))
+        if self.writer is not None:
+            log.info("Посты пишет: %s", " → ".join(self.writer.provider_names))
+        else:
+            log.info("Кнопка «Сделать пост» выключена: в .env нет GEMINI_TOKEN или GROQ_TOKEN")
 
     async def on_shutdown(self) -> None:
         await self.stop_background()
         log.info("Бот остановлен")
+
+
+def make_writer(config: Config, http: HttpClient) -> PostWriter | None:
+    """The post writer, or None when no LLM key is set in .env (the button is then hidden)."""
+    providers: list[Provider] = []
+    if config.gemini_token:
+        providers += [GeminiProvider(http, config.gemini_token, model)
+                      for model in config.gemini_models]
+    if config.groq_token:
+        providers += [GroqProvider(http, config.groq_token, model) for model in config.groq_models]
+    return PostWriter(http, providers) if providers else None
 
 
 def create_bot(config: Config) -> Bot:

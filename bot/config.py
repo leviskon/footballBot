@@ -36,6 +36,11 @@ class Config:
     request_timeout: int
     telegram_proxy: str | None = None
     telegram_api_url: str | None = None
+    gemini_token: str | None = None
+    gemini_models: tuple[str, ...] = ()
+    groq_token: str | None = None
+    groq_models: tuple[str, ...] = ()
+    post_signature: str = ""
 
 
 def _env(name: str) -> str:
@@ -105,6 +110,21 @@ def _optional_url(name: str, pattern: re.Pattern[str], example: str) -> str | No
     return raw.rstrip("/")
 
 
+# Tried in this order; the lighter model answers when the main one is overloaded.
+# Free tier (Nov 2026): the Flash models allow ~20 requests a day each, the Flash Lite ones
+# ~500, so Flash writes the first posts of the day and Lite takes over when it runs out.
+# gemini-flash-latest is the newest and most overloaded one, hence near the end. Named
+# versions may be retired by Google: a missing model is simply skipped.
+DEFAULT_GEMINI_MODELS = ("gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.1-flash-lite",
+                         "gemini-flash-lite-latest", "gemini-flash-latest")
+DEFAULT_GROQ_MODELS = ("openai/gpt-oss-120b", "qwen/qwen3.8-27b")
+
+
+def _list_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    items = tuple(part for part in re.split(r"[,;\s]+", _env(name)) if part)
+    return items or default
+
+
 def _path_env(name: str, default: str) -> Path:
     path = Path(_env(name) or default)
     return path if path.is_absolute() else BASE_DIR / path
@@ -146,4 +166,9 @@ def load_config(*, require_token: bool = True) -> Config:
         telegram_proxy=_optional_url("TELEGRAM_PROXY", _PROXY_RE,
                                      "socks5://user:password@1.2.3.4:1080 или http://127.0.0.1:8080"),
         telegram_api_url=_optional_url("TELEGRAM_API_URL", _URL_RE, "https://my-bot-api.example.com"),
+        gemini_token=_env("GEMINI_TOKEN") or _env("GEMINI_API_KEY") or _env("GEMINI_API") or None,
+        gemini_models=_list_env("GEMINI_MODELS", DEFAULT_GEMINI_MODELS),
+        groq_token=_env("GROQ_TOKEN") or _env("GROQ_API_KEY") or _env("GROQ_API") or None,
+        groq_models=_list_env("GROQ_MODELS", DEFAULT_GROQ_MODELS),
+        post_signature=_env("POST_SIGNATURE").replace("\\n", "\n"),
     )

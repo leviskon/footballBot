@@ -91,6 +91,49 @@ class HttpClient:
         except ValueError as exc:
             raise FetchError("ответ не является JSON") from exc
 
+    async def fetch_text(self, url: str, *, timeout: float | None = None) -> str:
+        """Download a web page (an article) and decode it."""
+        try:
+            async with self._client.get(
+                url, headers={"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"},
+                **_timeout(timeout),
+            ) as resp:
+                if resp.status != 200:
+                    raise FetchError(f"HTTP {resp.status}")
+                body = await self._read(resp)
+                try:
+                    encoding = resp.get_encoding()
+                except RuntimeError:
+                    encoding = "utf-8"
+        except TimeoutError:
+            raise FetchError("таймаут") from None
+        except aiohttp.ClientError as exc:
+            raise FetchError(_describe(exc)) from exc
+        try:
+            return body.decode(encoding, errors="replace")
+        except LookupError:
+            return body.decode("utf-8", errors="replace")
+
+    async def post_json(self, url: str, payload: Any, *, headers: dict[str, str] | None = None,
+                        timeout: float | None = None) -> tuple[int, Any]:
+        """POST a JSON body. Returns ``(status, parsed JSON or None)``; raises only on network
+        errors, so the caller can read API error messages from non-200 answers."""
+        try:
+            async with self._client.post(
+                url, json=payload, headers={"Accept": "application/json", **(headers or {})},
+                **_timeout(timeout),
+            ) as resp:
+                body = await self._read(resp)
+                status = resp.status
+        except TimeoutError:
+            raise FetchError("таймаут") from None
+        except aiohttp.ClientError as exc:
+            raise FetchError(_describe(exc)) from exc
+        try:
+            return status, json.loads(body)
+        except ValueError:
+            return status, None
+
     @staticmethod
     async def _read(resp: aiohttp.ClientResponse) -> bytes:
         if resp.content_length is not None and resp.content_length > MAX_BODY_BYTES:
@@ -103,6 +146,11 @@ class HttpClient:
                 raise FetchError("слишком большой ответ")
             chunks.append(chunk)
         return b"".join(chunks)
+
+
+def _timeout(seconds: float | None) -> dict[str, aiohttp.ClientTimeout]:
+    """Per-request timeout kwargs. Passing ``timeout=None`` to aiohttp would disable it."""
+    return {"timeout": aiohttp.ClientTimeout(total=seconds)} if seconds else {}
 
 
 def _describe(exc: aiohttp.ClientError) -> str:

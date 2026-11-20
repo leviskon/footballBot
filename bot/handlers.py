@@ -12,17 +12,20 @@ from typing import TYPE_CHECKING
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, CommandStart, Filter, or_f
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message, ReplyKeyboardMarkup,
+)
 
 from . import texts
 from .catalog import ALL_CATEGORY_KEYS, CATEGORY_BY_KEY
 from .keyboards import (
-    REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, news_keyboard, settings_keyboard,
+    REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, post_keyboard, settings_keyboard,
 )
 from .notifier import DeliveryError
-from .render import render_day
+from .render import render_day, render_post
 from .sources import LANGUAGE_NAMES, LANGUAGES
 from .textutil import esc
+from .writer import LLMError
 
 if TYPE_CHECKING:
     from .app import App
@@ -31,6 +34,11 @@ log = logging.getLogger(__name__)
 
 LATEST_DEFAULT = 5
 LATEST_MAX = 20
+POST_ACTIONS = frozenset({"post", "mpost", "repost", "rempost"})
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
+# Messages a post is being written for right now (a second tap must not start another one).
+_writing: set[tuple[int, int]] = set()
 
 
 class AdminFilter(Filter):
@@ -182,7 +190,7 @@ async def on_news_action(callback: CallbackQuery, callback_data: NewsAction, app
     if callback_data.action == "take":
         record = await app.db.get_news(callback_data.item)
         url = record.url if record else _first_url(message)
-        await _edit_markup(message, news_keyboard(callback_data.item, url, taken=True)
+        await _edit_markup(message, app.news_keyboard(callback_data.item, url, taken=True)
                            if url else None)
         await callback.answer("Отмечено ✅")
     elif callback_data.action == "del":
@@ -193,8 +201,77 @@ async def on_news_action(callback: CallbackQuery, callback_data: NewsAction, app
             await _edit_markup(message, None)
             await callback.answer("Telegram не даёт боту удалять сообщения старше 48 часов. "
                                   "Кнопки убрал — удали вручную.", show_alert=True)
+    elif callback_data.action in POST_ACTIONS:
+        await _write_post(callback, message, callback_data, app)
     else:
         await callback.answer()
+
+
+async def _write_post(callback: CallbackQuery, message: Message, data: NewsAction,
+                      app: App) -> None:
+    """«✍️ Сделать пост» / «🔄 Другой вариант»: ask the LLM for a ready channel post."""
+    writer = app.writer
+    if writer is None:
+        await callback.answer("Нейросеть не подключена: добавь GEMINI_TOKEN или GROQ_TOKEN "
+                              "в .env и перезапусти бота.", show_alert=True)
+        return
+    key = (message.chat.id, message.message_id)
+    if key in _writing:
+        await callback.answer("Уже пишу, подожди немного ✍️")
+        return
+
+    news_id: str | None = None
+    if data.action in ("post", "repost"):
+        news_id = data.item
+        record = await app.db.get_news(news_id)
+        if record is None:
+            await callback.answer("Эта новость уже удалена из базы (старше 14 дней).",
+                                  show_alert=True)
+            return
+        task = lambda: writer.news_post(record)  # noqa: E731
+    else:
+        source = message if data.action == "mpost" else message.reply_to_message
+        result_text = (source.text or "") if source else ""
+        if not result_text:
+            await callback.answer("Не нашёл сообщение с итогом матча.", show_alert=True)
+            return
+        task = lambda: writer.match_post(result_text)  # noqa: E731
+
+    regenerate = data.action in ("repost", "rempost")
+    _writing.add(key)
+    try:
+        await callback.answer("✍️ Пишу пост…")
+        if regenerate:
+            target = message
+            await _edit_text(target, "✍️ Пишу другой вариант…")
+        else:
+            target = await message.reply("✍️ Пишу пост, это займёт до минуты…")
+        try:
+            post = await task()
+        except LLMError as exc:
+            log.warning("Не удалось написать пост: %s", exc)
+            await _edit_text(target, "⚠️ Не получилось написать пост: нейросети сейчас "
+                             "перегружены или закончился бесплатный лимит. Попробуй через "
+                             "пару минут.", post_keyboard(news_id))
+            return
+        except Exception:
+            log.exception("Ошибка при написании поста")
+            await _edit_text(target, "⚠️ Не получилось написать пост из-за ошибки. "
+                             "Подробности — в logs/bot.log", post_keyboard(news_id))
+            return
+        await _edit_text(target, render_post(post, app.config.post_signature),
+                         post_keyboard(news_id))
+    finally:
+        _writing.discard(key)
+
+
+async def _edit_text(message: Message, text: str,
+                     markup: InlineKeyboardMarkup | None = None) -> None:
+    try:
+        await message.edit_text(text, reply_markup=markup, link_preview_options=NO_PREVIEW)
+    except TelegramBadRequest as exc:
+        if "not modified" not in exc.message.lower():
+            log.warning("Не удалось обновить сообщение: %s", exc.message)
 
 
 def _first_url(message: Message) -> str | None:

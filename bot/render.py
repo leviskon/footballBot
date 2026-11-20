@@ -164,3 +164,16 @@ def render_day(day: date, groups: Sequence[tuple[Category, Sequence[Match]]], tz
         rows += [_match_line(m, tz) for m in matches]
         blocks.append("\n".join(rows))
     return split_message("\n\n".join(blocks))
+
+
+# ------------------------------------------------------------------------ posts
+
+def render_post(post: str, signature: str = "") -> str:
+    """A written channel post: the headline in bold, the channel signature at the end."""
+    headline, _, body = post.strip().partition("\n")
+    text = f"<b>{esc(headline.strip())}</b>"
+    if body.strip():
+        text += "\n" + esc(body.rstrip())  # keeps the blank line after the headline, if any
+    if signature.strip():
+        text += f"\n\n\n{esc(signature.strip())}"
+    return truncate(text, MESSAGE_LIMIT) if len(text) > MESSAGE_LIMIT else text

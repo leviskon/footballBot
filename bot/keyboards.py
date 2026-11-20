@@ -47,8 +47,14 @@ REMOVE_MENU = ReplyKeyboardRemove()
 
 
 class NewsAction(CallbackData, prefix="n"):
-    action: str  # "take" | "del" | "noop"
+    # "take" | "del" | "noop" — news buttons;
+    # "post" — write a post about news ``item``; "mpost" — about the match result in this
+    # message; "repost" / "rempost" — another version of the post in this message.
+    action: str
     item: str
+
+
+POST_BUTTON = "✍️ Сделать пост"
 
 
 class SettingsAction(CallbackData, prefix="s"):
@@ -56,8 +62,13 @@ class SettingsAction(CallbackData, prefix="s"):
     value: str
 
 
-def news_keyboard(item_id: str, url: str, *, taken: bool = False) -> InlineKeyboardMarkup:
+def news_keyboard(item_id: str, url: str, *, taken: bool = False,
+                  post: bool = False) -> InlineKeyboardMarkup:
+    # The source link must stay the very first button (handlers read the URL from it).
     rows = [[InlineKeyboardButton(text="🔗 Открыть источник", url=url)]]
+    if post:
+        rows.append([InlineKeyboardButton(
+            text=POST_BUTTON, callback_data=NewsAction(action="post", item=item_id).pack())])
     if taken:
         rows.append([InlineKeyboardButton(
             text="✅ Взято", callback_data=NewsAction(action="noop", item=item_id).pack())])
@@ -69,6 +80,21 @@ def news_keyboard(item_id: str, url: str, *, taken: bool = False) -> InlineKeybo
                                  callback_data=NewsAction(action="del", item=item_id).pack()),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def match_keyboard() -> InlineKeyboardMarkup:
+    """Under a match result: write a post from the result in this message."""
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text=POST_BUTTON, callback_data=NewsAction(action="mpost", item="0").pack())]])
+
+
+def post_keyboard(item: str | None) -> InlineKeyboardMarkup:
+    """Under a written post: another version. ``item`` is the news id, None for a match post
+    (its source is the result message the post replies to)."""
+    action = NewsAction(action="repost", item=item) if item else NewsAction(action="rempost",
+                                                                              item="0")
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="🔄 Другой вариант", callback_data=action.pack())]])
 
 
 def _mark(enabled: bool) -> str:
