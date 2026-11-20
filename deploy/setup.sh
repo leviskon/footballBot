@@ -37,6 +37,10 @@ apt_install() {
 }
 
 [ -f "$SRC/bot/__main__.py" ] || fail "В папке $SRC нет файлов бота"
+# GitHub Actions присылает только код, без .env: берём тот, что уже лежит на сервере.
+if [ ! -f "$SRC/.env" ] && [ "$SRC" != "$APP_DIR" ] && [ -f "$APP_DIR/.env" ]; then
+    cp "$APP_DIR/.env" "$SRC/.env"
+fi
 [ -f "$SRC/.env" ] || fail "В папке $SRC нет файла .env с токеном"
 command -v systemctl >/dev/null || fail "На сервере нет systemd — нужен Ubuntu или Debian"
 sudo -n true 2>/dev/null || fail "Пользователю $RUN_USER нужен sudo без пароля (на Oracle Cloud он есть у ubuntu)"
