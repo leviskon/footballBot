@@ -26,6 +26,7 @@ from .keyboards import (
 from .notifier import DeliveryError
 from .render import fit_post, render_day, render_post, render_result
 from .sources import LANGUAGE_NAMES, LANGUAGES
+from .storage import NewsRecord
 from .textutil import esc, html_to_text
 from .writer import LLMError, Post
 
@@ -231,6 +232,7 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
     regenerate = action in ("repost", "rempost")
     news_id = match_id = None
     match_info = None
+    record: NewsRecord | None = None
     if action in ("post", "repost"):
         news_id = item
         record = await app.db.get_news(item)
@@ -267,6 +269,8 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
     try:
         if match_id is None:
             await callback.answer("✍️ Пишу пост…")
+        # the photo credit of the first version (read before the placeholder replaces it)
+        kept_credit = _photo_credit(message.caption or "") if regenerate else ""
         if regenerate:
             target = message
             await _set_text(target, "✍️ Пишу другой вариант…")
@@ -288,16 +292,19 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
 
         signature = app.config.post_signature
         if regenerate:
-            text = fit_post(post.text, signature) if target.photo else \
-                render_post(post.text, signature)
+            if target.photo:
+                text = fit_post(post.text, _with_credit(signature, kept_credit))
+            else:
+                text = render_post(post.text, signature)
             await _set_text(target, text, keyboard)
             return
 
-        photo = await _post_picture(app, post, match_info, message)
+        photo, credit = await _post_picture(app, post, match_info, message, record)
         if photo is not None:
             try:
-                await message.reply_photo(photo, caption=fit_post(post.text, signature),
-                                          reply_markup=keyboard)
+                await message.reply_photo(
+                    photo, caption=fit_post(post.text, _with_credit(signature, credit)),
+                    reply_markup=keyboard)
             except TelegramBadRequest as exc:
                 log.warning("Не удалось отправить пост с фото: %s", exc.message)
             else:
@@ -309,25 +316,32 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         _writing.discard(key)
 
 
-async def _post_picture(app: App, post: Post, match_info, message: Message
-                        ) -> BufferedInputFile | str | None:
-    """The article photo for a news post, the result card for a match post."""
+async def _post_picture(app: App, post: Post, match_info, message: Message,
+                        record: NewsRecord | None) -> tuple[BufferedInputFile | str | None, str]:
+    """``(picture, credit)``: a photo for a news post (see :mod:`bot.photos`), the result card
+    for a match post. The credit is the attribution a free licence requires, or empty."""
     try:
         if match_info is not None:
-            card = await app.cards.make(*match_info)
-            return BufferedInputFile(card, "result.jpg")
-        for url in post.images:
-            photo = await app.cards.photo(url)
-            if photo:
-                return BufferedInputFile(photo, "photo.jpg")
-        if post.images:
-            return None
+            return BufferedInputFile(await app.cards.make(*match_info), "result.jpg"), ""
+        if record is not None:
+            picture = await app.photos.for_news(record, post.images)
+            if picture is None:
+                return None, ""
+            return BufferedInputFile(picture.data, "photo.jpg"), picture.credit
     except Exception:
         log.exception("Не удалось подготовить картинку для поста")
-        return None
+        return None, ""
     if message.photo:  # an older result message that already carries a picture
-        return message.photo[-1].file_id
-    return None
+        return message.photo[-1].file_id, ""
+    return None, ""
+
+
+def _photo_credit(caption: str) -> str:
+    return next((line for line in caption.splitlines() if line.startswith("📷")), "")
+
+
+def _with_credit(signature: str, credit: str) -> str:
+    return "\n".join(part for part in (signature.strip(), credit) if part)
 
 
 async def _set_text(message: Message, text: str,

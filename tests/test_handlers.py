@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from bot.handlers import _write_post
 from bot.keyboards import NewsAction
 from bot.storage import NewsRecord, NewsStatus
+from bot.photos import Picture
 from bot.writer import LLMError, Post
 
 
@@ -59,7 +60,7 @@ RECORD = NewsRecord(id="n1", source="sportsru", lang="ru", url="https://ru.examp
                     status=NewsStatus.SENT, image="https://img.example/feed.jpg")
 
 
-def make_app(*, fail=False, photo=b"\xff\xd8jpeg"):
+def make_app(*, fail=False, photo=b"\xff\xd8jpeg", related=None, credit=False):
     class Writer:
         calls = 0
 
@@ -73,11 +74,13 @@ def make_app(*, fail=False, photo=b"\xff\xd8jpeg"):
         async def get_news(self, news_id):
             return RECORD if news_id == "n1" else None
 
-    class Cards:
-        async def photo(self, url):
-            return photo
+    class Photos:
+        async def for_news(self, record, images):
+            data = photo or related
+            return Picture(data, "📷 Zafer / Wikimedia Commons, CC BY 4.0" if credit else "") \
+                if data else None
 
-    return SimpleNamespace(writer=Writer(), db=Db(), cards=Cards(), matches=None,
+    return SimpleNamespace(writer=Writer(), db=Db(), photos=Photos(), cards=None, matches=None,
                            config=SimpleNamespace(post_signature="⚽️ FUTERA"))
 
 
@@ -121,3 +124,23 @@ def test_missing_news_and_missing_writer():
     callback = FakeCallback()
     asyncio.run(_write_post(callback, FakeMessage(), NewsAction(action="post", item="n1"), app))
     assert "Нейросеть не подключена" in callback.answers[0]
+
+
+def test_photo_of_the_same_story_from_another_site():
+    app = make_app(photo=None, related=b"\xff\xd8other")
+    news = FakeMessage("новость")
+    asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
+    placeholder, post = news.replies
+    assert placeholder.deleted and post.sent_photo.data == b"\xff\xd8other"
+
+
+def test_wikipedia_credit_is_kept_in_every_version():
+    app = make_app(credit=True)
+    news = FakeMessage("новость")
+    asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
+    post = news.replies[1]
+    assert post.caption.endswith("FUTERA\n📷 Zafer / Wikimedia Commons, CC BY 4.0")
+    post.caption = "🚨 ВАРИАНТ 1\n\nТекст.\n\n\n⚽️ FUTERA\n📷 Zafer / Wikimedia Commons, CC BY 4.0"
+    asyncio.run(_write_post(FakeCallback(), post, NewsAction(action="repost", item="n1"), app))
+    assert post.caption.startswith("<b>🚨 ВАРИАНТ 2</b>")
+    assert post.caption.endswith("📷 Zafer / Wikimedia Commons, CC BY 4.0")

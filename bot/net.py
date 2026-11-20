@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+
+log = logging.getLogger(__name__)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 )
 MAX_BODY_BYTES = 8 * 1024 * 1024
+# A page that stops sending data for this long, or sends it slower than MIN_RATE bytes/s,
+# is used as far as it arrived.
+STALL_SEC = 3.0
+MIN_RATE = 8 * 1024
 
 
 class FetchError(Exception):
@@ -75,10 +84,12 @@ class HttpClient:
         except aiohttp.ClientError as exc:
             raise FetchError(_describe(exc)) from exc
 
-    async def fetch_json(self, url: str, params: dict[str, str] | None = None) -> Any:
+    async def fetch_json(self, url: str, params: dict[str, str] | None = None, *,
+                         headers: dict[str, str] | None = None) -> Any:
         try:
             async with self._client.get(url, params=params,
-                                        headers={"Accept": "application/json"}) as resp:
+                                        headers={"Accept": "application/json",
+                                                 **(headers or {})}) as resp:
                 if resp.status != 200:
                     raise FetchError(f"HTTP {resp.status}")
                 body = await self._read(resp)
@@ -91,33 +102,67 @@ class HttpClient:
         except ValueError as exc:
             raise FetchError("ответ не является JSON") from exc
 
-    async def fetch_text(self, url: str, *, timeout: float | None = None) -> str:
-        """Download a web page (an article) and decode it."""
+    async def fetch_text(self, url: str, *, timeout: float = 20) -> str:
+        """Download a web page (an article) and decode it.
+
+        Some sites send pages to foreign servers very slowly. When the transfer stalls or
+        trickles slower than ``MIN_RATE`` for ``STALL_SEC`` (or ``timeout`` runs out) after part of the page has arrived, that part
+        is returned: the picture and the beginning of the article are at the top of the page.
+        """
+        chunks: list[bytes] = []
+        charset = None
         try:
-            async with self._client.get(
-                url, headers={"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"},
-                **_timeout(timeout),
-            ) as resp:
-                if resp.status != 200:
-                    raise FetchError(f"HTTP {resp.status}")
-                body = await self._read(resp)
-                try:
-                    encoding = resp.get_encoding()
-                except RuntimeError:
-                    encoding = "utf-8"
+            async with asyncio.timeout(timeout):
+                async with self._client.get(
+                    url, headers={"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"},
+                    timeout=aiohttp.ClientTimeout(total=None, sock_connect=min(10.0, timeout)),
+                ) as resp:
+                    if resp.status != 200:
+                        raise FetchError(f"HTTP {resp.status}")
+                    charset = resp.charset
+                    size = 0
+                    loop = asyncio.get_running_loop()
+                    window_start, window_size = loop.time(), 0
+                    while size <= MAX_BODY_BYTES:
+                        try:
+                            chunk = await asyncio.wait_for(resp.content.readany(),
+                                                           STALL_SEC if chunks else None)
+                        except TimeoutError:
+                            chunk = None  # stalled
+                        if chunk == b"":
+                            break  # the whole page has arrived
+                        if chunk:
+                            size += len(chunk)
+                            chunks.append(chunk)
+                        # once part of the page is here, a stalled or trickling transfer
+                        # (some sites throttle servers abroad to ~250 bytes/s) ends the read
+                        if loop.time() - window_start >= STALL_SEC or chunk is None:
+                            if size - window_size < MIN_RATE * STALL_SEC:
+                                log.info("Страница %s грузится медленно — беру первые %d КБ",
+                                         url, size // 1024)
+                                break
+                            window_start, window_size = loop.time(), size
         except TimeoutError:
-            raise FetchError("таймаут") from None
+            if not chunks:
+                raise FetchError("таймаут") from None
+            log.info("Страница %s грузится медленно — беру первые %d КБ", url,
+                     sum(map(len, chunks)) // 1024)
         except aiohttp.ClientError as exc:
-            raise FetchError(_describe(exc)) from exc
+            if not chunks:
+                raise FetchError(_describe(exc)) from exc
+        body = b"".join(chunks)
+        encoding = charset or _meta_charset(body) or "utf-8"
         try:
             return body.decode(encoding, errors="replace")
         except LookupError:
             return body.decode("utf-8", errors="replace")
 
-    async def fetch_bytes(self, url: str, *, timeout: float | None = None) -> bytes:
+    async def fetch_bytes(self, url: str, *, timeout: float | None = None,
+                          headers: dict[str, str] | None = None) -> bytes:
         """Download a binary file (a logo or a photo)."""
         try:
-            async with self._client.get(url, headers={"Accept": "image/*,*/*;q=0.5"},
+            async with self._client.get(url, headers={"Accept": "image/*,*/*;q=0.5",
+                                                      **(headers or {})},
                                         **_timeout(timeout)) as resp:
                 if resp.status != 200:
                     raise FetchError(f"HTTP {resp.status}")
@@ -159,6 +204,14 @@ class HttpClient:
                 raise FetchError("слишком большой ответ")
             chunks.append(chunk)
         return b"".join(chunks)
+
+
+_META_CHARSET_RE = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([\w-]+)""", re.IGNORECASE)
+
+
+def _meta_charset(body: bytes) -> str | None:
+    match = _META_CHARSET_RE.search(body[:4096])
+    return match.group(1).decode("ascii") if match else None
 
 
 def _timeout(seconds: float | None) -> dict[str, aiohttp.ClientTimeout]:

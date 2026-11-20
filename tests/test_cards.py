@@ -9,6 +9,7 @@ from bot.cards import CardEvent, CardTeam, ResultCard, render_card, to_jpeg, H, 
 from bot.catalog import EPL
 from bot.espn import Goal, Match, TeamScore
 from bot.net import FetchError
+from bot.photos import PhotoFinder
 from bot.storage import NewsRecord, NewsStatus, Storage
 
 
@@ -57,7 +58,7 @@ class FakeHttp:
         self.files = files
         self.requested: list[str] = []
 
-    async def fetch_bytes(self, url, *, timeout=None):
+    async def fetch_bytes(self, url, *, timeout=None, headers=None):
         self.requested.append(url)
         if url not in self.files:
             raise FetchError("HTTP 404")
@@ -98,7 +99,7 @@ def test_card_maker_end_to_end(tmp_path):
                          "https://l.example/ned.png": png((255, 100, 0, 255)),
                          "https://img.example/report.jpg": png((80, 80, 80, 255), (1200, 675))})
         writer = FakeWriter()
-        maker = CardMaker(http, db, writer, brand="FUTERA")
+        maker = CardMaker(http, db, writer, PhotoFinder(http, db), brand="FUTERA")
         card = await maker.make(match, EPL)
         assert Image.open(io.BytesIO(card)).size == (W, H)
         assert "https://img.example/report.jpg" in http.requested  # the match photo was used
@@ -107,6 +108,35 @@ def test_card_maker_end_to_end(tmp_path):
         await maker.make(match, EPL, hero=False)  # logos come from the cache this time
         assert http.requested.count("https://l.example/ger.png") == 1
         assert writer.calls == 2  # «Jan Unknown» is retried, «Florian Wirtz» is cached
+        await db.close()
+
+    asyncio.run(scenario())
+
+
+def test_related_photo_comes_from_another_outlet(tmp_path):
+    from bot.textutil import title_fingerprint
+
+    async def scenario():
+        db = await Storage.open(tmp_path / "t.sqlite3")
+        title = "Головин пропустит матч с «Осером» из-за травмы бедра"
+
+        def story(news_id, source, url, image="", offset=0, title=title):
+            return NewsRecord(id=news_id, source=source, lang="ru", url=url, title=title,
+                              summary="", published_at=1_000_000 + offset, fetched_at=0,
+                              status=NewsStatus.SENT, fingerprint=title_fingerprint(title),
+                              image=image)
+
+        blocked = story("c", "championat", "https://championat.example/1")
+        await db.add_news([
+            blocked,
+            story("s", "sportsru", "https://sports.example/1", "https://img.example/s.jpg", 60),
+            story("x", "matchtv", "https://matchtv.example/1", "https://img.example/x.jpg", 30,
+                  title="Сафонов сыграет против «Ниццы» в субботу"),
+        ])
+        http = FakeHttp({"https://img.example/s.jpg": png((1, 2, 3, 255), (800, 450)),
+                         "https://img.example/report.jpg": b"1x1 gif"})
+        picture = await PhotoFinder(http, db).same_story(blocked)
+        assert picture is not None and "https://img.example/x.jpg" not in http.requested
         await db.close()
 
     asyncio.run(scenario())

@@ -19,6 +19,7 @@ from aiogram.types import BotCommand, InlineKeyboardMarkup, User
 
 from .access import Access
 from .cardmaker import CardMaker
+from .photos import PhotoFinder
 from .catalog import Category
 from .classifier import Classifier
 from .config import Config
@@ -65,7 +66,8 @@ class App:
                                     interval=config.matches_interval,
                                     digest_time=config.digest_time)
         self.writer = make_writer(config, http)
-        self.cards = CardMaker(http, db, self.writer, brand=config.card_brand)
+        self.photos = PhotoFinder(http, db)
+        self.cards = CardMaker(http, db, self.writer, self.photos, brand=config.card_brand)
         self.started_at = time.time()
         self.bot_username = ""
         self._news_lock = asyncio.Lock()

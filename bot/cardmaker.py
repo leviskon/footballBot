@@ -8,14 +8,15 @@ import logging
 from collections import OrderedDict
 from pathlib import Path
 
-from .cards import CardEvent, CardTeam, ResultCard, render_card, to_jpeg
+from .cards import CardEvent, CardTeam, ResultCard, render_card
 from .catalog import Category
 from .espn import Match, TeamScore
 from .net import FetchError, HttpClient
 from .render import team_name
+from .photos import PhotoFinder
 from .storage import Storage
 from .textutil import fold
-from .writer import LLMError, PostWriter, extract_image
+from .writer import LLMError, PostWriter
 
 log = logging.getLogger(__name__)
 
@@ -45,9 +46,10 @@ def _latin_surname(name: str) -> str:
 
 
 class CardMaker:
-    def __init__(self, http: HttpClient, db: Storage, writer: PostWriter | None, *,
-                 brand: str = "") -> None:
+    def __init__(self, http: HttpClient, db: Storage, writer: PostWriter | None,
+                 photos: PhotoFinder, *, brand: str = "") -> None:
         self._http = http
+        self._photos = photos
         self._db = db
         self._writer = writer
         self._brand = brand
@@ -73,29 +75,13 @@ class CardMaker:
             self._assets.popitem(last=False)
         return data
 
-    async def photo(self, url: str | None) -> bytes | None:
-        """A picture from the web re-encoded as a JPEG for Telegram (None if unusable)."""
-        if not url:
-            return None
-        try:
-            data = await self._http.fetch_bytes(url, timeout=ASSET_TIMEOUT_SEC)
-        except FetchError as exc:
-            log.info("Не удалось скачать фото %s: %s", url, exc)
-            return None
-        return await asyncio.to_thread(to_jpeg, data)
-
     async def _hero(self, match: Match, home: str, away: str) -> bytes | None:
         """The photo of the freshest news story about this match, if the bot has one."""
         start = int(match.kickoff.timestamp())
         stories = [r for r in await self._db.news_between(start, start + HERO_WINDOW_SEC)
                    if mentions_both(r.title, home, away)]
         for story in stories[:HERO_CANDIDATES]:
-            try:
-                html = await self._http.fetch_text(story.url, timeout=ASSET_TIMEOUT_SEC)
-                page_image = extract_image(html, story.url)
-            except FetchError:
-                page_image = None
-            photo = await self.photo(page_image) or await self.photo(story.image or None)
+            photo = await self._photos.story_photo(story)
             if photo:
                 log.info("Фото для карточки %s — %s: %s", home, away, story.title)
                 return photo
