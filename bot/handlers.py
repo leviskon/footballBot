@@ -6,6 +6,7 @@ The menu buttons are the main interface. Slash commands stay as hidden aliases
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -13,7 +14,8 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject, CommandStart, Filter, or_f
 from aiogram.types import (
-    CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message, ReplyKeyboardMarkup,
+    BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message,
+    ReplyKeyboardMarkup,
 )
 
 from . import texts
@@ -22,10 +24,10 @@ from .keyboards import (
     REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, post_keyboard, settings_keyboard,
 )
 from .notifier import DeliveryError
-from .render import render_day, render_post
+from .render import fit_post, render_day, render_post, render_result
 from .sources import LANGUAGE_NAMES, LANGUAGES
-from .textutil import esc
-from .writer import LLMError
+from .textutil import esc, html_to_text
+from .writer import LLMError, Post
 
 if TYPE_CHECKING:
     from .app import App
@@ -209,7 +211,12 @@ async def on_news_action(callback: CallbackQuery, callback_data: NewsAction, app
 
 async def _write_post(callback: CallbackQuery, message: Message, data: NewsAction,
                       app: App) -> None:
-    """«✍️ Сделать пост» / «🔄 Другой вариант»: ask the LLM for a ready channel post."""
+    """«✍️ Сделать пост» / «🔄 Другой вариант»: a ready channel post with a picture.
+
+    News posts get the article's photo, match posts the branded result card. The first tap
+    answers the source message with a placeholder that is replaced by the post; «another
+    version» rewrites the text of the post in place and keeps its picture.
+    """
     writer = app.writer
     if writer is None:
         await callback.answer("Нейросеть не подключена: добавь GEMINI_TOKEN или GROQ_TOKEN "
@@ -220,55 +227,117 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         await callback.answer("Уже пишу, подожди немного ✍️")
         return
 
-    news_id: str | None = None
-    if data.action in ("post", "repost"):
-        news_id = data.item
-        record = await app.db.get_news(news_id)
+    action, item = data.action, data.item
+    regenerate = action in ("repost", "rempost")
+    news_id = match_id = None
+    match_info = None
+    if action in ("post", "repost"):
+        news_id = item
+        record = await app.db.get_news(item)
         if record is None:
             await callback.answer("Эта новость уже удалена из базы (старше 14 дней).",
                                   show_alert=True)
             return
-        task = lambda: writer.news_post(record)  # noqa: E731
-    else:
-        source = message if data.action == "mpost" else message.reply_to_message
-        result_text = (source.text or "") if source else ""
+
+        async def write() -> Post:
+            return await writer.news_post(record)
+    elif item != "0":
+        match_id = item
+        await callback.answer("✍️ Пишу пост…")
+        match_info = await app.matches.find_match(item)
+        if match_info is None:
+            await message.answer("⚠️ Не нашёл этот матч у ESPN — попробуй позже.")
+            return
+        result_text = html_to_text(render_result(*match_info))
+
+        async def write() -> Post:
+            return Post(await writer.match_post(result_text))
+    else:  # a result message from an older version of the bot: only its text is known
+        source = message if action == "mpost" else message.reply_to_message
+        result_text = (source.text or source.caption or "") if source else ""
         if not result_text:
             await callback.answer("Не нашёл сообщение с итогом матча.", show_alert=True)
             return
-        task = lambda: writer.match_post(result_text)  # noqa: E731
 
-    regenerate = data.action in ("repost", "rempost")
+        async def write() -> Post:
+            return Post(await writer.match_post(result_text))
+
+    keyboard = post_keyboard(news_id=news_id, match_id=match_id)
     _writing.add(key)
     try:
-        await callback.answer("✍️ Пишу пост…")
+        if match_id is None:
+            await callback.answer("✍️ Пишу пост…")
         if regenerate:
             target = message
-            await _edit_text(target, "✍️ Пишу другой вариант…")
+            await _set_text(target, "✍️ Пишу другой вариант…")
         else:
             target = await message.reply("✍️ Пишу пост, это займёт до минуты…")
         try:
-            post = await task()
+            post = await write()
         except LLMError as exc:
             log.warning("Не удалось написать пост: %s", exc)
-            await _edit_text(target, "⚠️ Не получилось написать пост: нейросети сейчас "
-                             "перегружены или закончился бесплатный лимит. Попробуй через "
-                             "пару минут.", post_keyboard(news_id))
+            await _set_text(target, "⚠️ Не получилось написать пост: нейросети сейчас "
+                            "перегружены или закончился бесплатный лимит. Попробуй через "
+                            "пару минут.", keyboard)
             return
         except Exception:
             log.exception("Ошибка при написании поста")
-            await _edit_text(target, "⚠️ Не получилось написать пост из-за ошибки. "
-                             "Подробности — в logs/bot.log", post_keyboard(news_id))
+            await _set_text(target, "⚠️ Не получилось написать пост из-за ошибки. "
+                            "Подробности — в logs/bot.log", keyboard)
             return
-        await _edit_text(target, render_post(post, app.config.post_signature),
-                         post_keyboard(news_id))
+
+        signature = app.config.post_signature
+        if regenerate:
+            text = fit_post(post.text, signature) if target.photo else \
+                render_post(post.text, signature)
+            await _set_text(target, text, keyboard)
+            return
+
+        photo = await _post_picture(app, post, match_info, message)
+        if photo is not None:
+            try:
+                await message.reply_photo(photo, caption=fit_post(post.text, signature),
+                                          reply_markup=keyboard)
+            except TelegramBadRequest as exc:
+                log.warning("Не удалось отправить пост с фото: %s", exc.message)
+            else:
+                with contextlib.suppress(TelegramBadRequest):
+                    await target.delete()
+                return
+        await _set_text(target, render_post(post.text, signature), keyboard)
     finally:
         _writing.discard(key)
 
 
-async def _edit_text(message: Message, text: str,
-                     markup: InlineKeyboardMarkup | None = None) -> None:
+async def _post_picture(app: App, post: Post, match_info, message: Message
+                        ) -> BufferedInputFile | str | None:
+    """The article photo for a news post, the result card for a match post."""
     try:
-        await message.edit_text(text, reply_markup=markup, link_preview_options=NO_PREVIEW)
+        if match_info is not None:
+            card = await app.cards.make(*match_info)
+            return BufferedInputFile(card, "result.jpg")
+        for url in post.images:
+            photo = await app.cards.photo(url)
+            if photo:
+                return BufferedInputFile(photo, "photo.jpg")
+        if post.images:
+            return None
+    except Exception:
+        log.exception("Не удалось подготовить картинку для поста")
+        return None
+    if message.photo:  # an older result message that already carries a picture
+        return message.photo[-1].file_id
+    return None
+
+
+async def _set_text(message: Message, text: str,
+                    markup: InlineKeyboardMarkup | None = None) -> None:
+    """Replace the text of a message, or its caption when it is a photo."""
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=markup)
+        else:
+            await message.edit_text(text, reply_markup=markup, link_preview_options=NO_PREVIEW)
     except TelegramBadRequest as exc:
         if "not modified" not in exc.message.lower():
             log.warning("Не удалось обновить сообщение: %s", exc.message)

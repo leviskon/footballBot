@@ -1,12 +1,15 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 
 from bot.keyboards import NewsAction, match_keyboard, news_keyboard, post_keyboard
 from bot.net import FetchError
-from bot.render import render_post
+from bot.render import CAPTION_LIMIT, fit_post, plain_len, render_post
 from bot.storage import NewsRecord, NewsStatus
-from bot.writer import LLMError, PostWriter, clean_post, extract_article, news_prompt
+from bot.writer import (
+    LLMError, PostWriter, clean_post, extract_article, extract_image, news_prompt, parse_json_object,
+)
 
 RECORD = NewsRecord(
     id="abc123", source="sportsru", lang="ru", url="https://www.sports.ru/news/1",
@@ -70,7 +73,7 @@ def test_falls_back_to_the_next_provider():
     groq = FakeProvider("Groq", answer="❗️ ПОСТ\n\nТекст.")
     writer = PostWriter(FakeHttp("<article><p>" + "Текст статьи. " * 10 + "</p></article>"),
                         [busy, groq])
-    assert asyncio.run(writer.news_post(RECORD)) == "❗️ ПОСТ\n\nТекст."
+    assert asyncio.run(writer.news_post(RECORD)).text == "❗️ ПОСТ\n\nТекст."
     assert busy.prompts and groq.prompts
     assert "Текст статьи." in groq.prompts[0] and "Sports.ru" in groq.prompts[0]
 
@@ -95,11 +98,15 @@ def test_post_buttons():
     assert NewsAction.unpack(with_post[1][0].callback_data) == NewsAction(action="post",
                                                                            item="abc123")
     assert len(news_keyboard("abc123", "https://x.example").inline_keyboard) == 2
-    assert NewsAction.unpack(match_keyboard().inline_keyboard[0][0].callback_data).action == "mpost"
-    assert NewsAction.unpack(post_keyboard("abc123").inline_keyboard[0][0].callback_data) == \
-        NewsAction(action="repost", item="abc123")
-    assert NewsAction.unpack(post_keyboard(None).inline_keyboard[0][0].callback_data).action == \
-        "rempost"
+    assert NewsAction.unpack(match_keyboard("401861194").inline_keyboard[0][0].callback_data) == \
+        NewsAction(action="mpost", item="401861194")
+
+    def unpack(markup):
+        return NewsAction.unpack(markup.inline_keyboard[0][0].callback_data)
+
+    assert unpack(post_keyboard(news_id="abc123")) == NewsAction(action="repost", item="abc123")
+    assert unpack(post_keyboard(match_id="401")) == NewsAction(action="rempost", item="401")
+    assert unpack(post_keyboard()) == NewsAction(action="rempost", item="0")
 
 
 def test_failed_provider_rests_and_goes_last():
@@ -109,3 +116,44 @@ def test_failed_provider_rests_and_goes_last():
     asyncio.run(writer.news_post(RECORD))
     asyncio.run(writer.news_post(RECORD))
     assert len(busy.prompts) == 1 and len(ok.prompts) == 2  # the second post did not wait
+
+
+def test_news_post_carries_the_article_photo():
+    html = ('<html><head><meta content="/img/valverde.jpg" property="og:image">'
+            '</head><body><p>' + "Текст статьи. " * 10 + "</p></body></html>")
+    post = asyncio.run(PostWriter(FakeHttp(html), [FakeProvider("A", answer="ПОСТ")])
+                       .news_post(RECORD))
+    assert post.images == ("https://www.sports.ru/img/valverde.jpg",)
+
+
+def test_extract_image_priorities():
+    html = """<meta name="twitter:image" content="https://cdn.example/tw.jpg">
+              <meta property='og:image' content='https://cdn.example/og.jpg?w=1200&amp;h=630'>"""
+    assert extract_image(html, "https://site.example/a") == "https://cdn.example/og.jpg?w=1200&h=630"
+    assert extract_image("<p>нет картинки</p>", "https://site.example/a") is None
+
+
+def test_fit_post_respects_the_caption_limit():
+    short = "🚨 ЗАГОЛОВОК\n\nПервый абзац.\n\nВторой абзац."
+    assert fit_post(short, "⚽️ FUTERA") == render_post(short, "⚽️ FUTERA")
+
+    long = "🚨 ЗАГОЛОВОК\n\n" + "\n\n".join(["Предложение номер один. " * 12] * 4)
+    fitted = fit_post(long, "⚽️ FUTERA | Больше, чем просто футбол.")
+    assert plain_len(fitted) <= CAPTION_LIMIT
+    assert fitted.startswith("<b>🚨 ЗАГОЛОВОК</b>") and fitted.endswith("просто футбол.")
+
+    one_huge_paragraph = "ЗАГОЛОВОК\n" + "Очень длинное предложение без конца " * 60
+    assert plain_len(fit_post(one_huge_paragraph, "подпись")) <= CAPTION_LIMIT
+
+
+def test_parse_json_object_from_a_fenced_answer():
+    assert parse_json_object('```json\n{"Florian Wirtz": "Вирц"}\n```') == {"Florian Wirtz": "Вирц"}
+    with pytest.raises(LLMError):
+        parse_json_object("Не знаю")
+
+
+def test_feed_picture_is_the_fallback():
+    record = replace(RECORD, image="https://img.example/feed.jpg")
+    post = asyncio.run(PostWriter(FakeHttp(broken=True), [FakeProvider("A", answer="ПОСТ")])
+                       .news_post(record))
+    assert post.images == ("https://img.example/feed.jpg",)

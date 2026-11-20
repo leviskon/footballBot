@@ -27,6 +27,9 @@ class TeamScore:
     score: int | None
     shootout: int | None
     winner: bool
+    logo: str | None = None
+    color: str | None = None  # hex without «#», e.g. "d02a3e"
+    alt_color: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,7 @@ class Match:
     red_cards: tuple[Card, ...] = ()
     venue: str | None = None
     note: str | None = None
+    league_logo: str | None = None  # a variant for dark backgrounds when ESPN has one
 
     @property
     def is_final(self) -> bool:
@@ -106,7 +110,30 @@ def _team(raw: dict[str, Any]) -> TeamScore:
         score=_to_int(raw.get("score")),
         shootout=_to_int(raw.get("shootoutScore")),
         winner=bool(raw.get("winner")),
+        logo=_https(team.get("logo")),
+        color=_hex(team.get("color")),
+        alt_color=_hex(team.get("alternateColor")),
     )
+
+
+def _hex(value: Any) -> str | None:
+    text = str(value or "").strip().lstrip("#")
+    return text.lower() if len(text) == 6 and all(c in "0123456789abcdefABCDEF" for c in text) \
+        else None
+
+
+def _https(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text if text.startswith(("https://", "http://")) else None
+
+
+def _league_logo(data: dict[str, Any]) -> str | None:
+    leagues = data.get("leagues")
+    if not isinstance(leagues, list) or not leagues or not isinstance(leagues[0], dict):
+        return None
+    logos = [l for l in leagues[0].get("logos") or [] if isinstance(l, dict) and l.get("href")]
+    dark = [l for l in logos if "dark" in (l.get("rel") or [])]
+    return _https((dark or logos or [{}])[0].get("href"))
 
 
 def _player(detail: dict[str, Any]) -> str:
@@ -116,7 +143,7 @@ def _player(detail: dict[str, Any]) -> str:
     return "—"
 
 
-def _parse_event(event: dict[str, Any], code: str) -> Match:
+def _parse_event(event: dict[str, Any], code: str, league_logo: str | None = None) -> Match:
     competition = event["competitions"][0]
     status = event.get("status") or competition.get("status") or {}
     status_type = status.get("type") or {}
@@ -162,6 +189,7 @@ def _parse_event(event: dict[str, Any], code: str) -> Match:
         red_cards=tuple(reds),
         venue=((competition.get("venue") or {}).get("fullName") or None),
         note=note,
+        league_logo=league_logo,
     )
 
 
@@ -169,10 +197,11 @@ def parse_scoreboard(data: Any, code: str) -> list[Match]:
     events = data.get("events") if isinstance(data, dict) else None
     if not isinstance(events, list):
         return []
+    league_logo = _league_logo(data)
     matches = []
     for event in events:
         try:
-            matches.append(_parse_event(event, code))
+            matches.append(_parse_event(event, code, league_logo))
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
             log.debug("Пропущен некорректный матч в %s: %r", code, exc)
     return matches

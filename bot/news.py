@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import html
 import io
 import logging
 import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+
+from urllib.parse import urljoin
 
 import feedparser
 
@@ -48,6 +51,7 @@ class Candidate:
     summary: str
     tags: tuple[str, ...]
     published_at: int
+    image: str = ""
 
 
 @dataclass(slots=True)
@@ -104,6 +108,45 @@ def _entry_summary(entry: Mapping, title: str) -> str:
     return truncate(summary, SUMMARY_LIMIT)
 
 
+_IMG_RE = re.compile(r"""<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|webp)(\?|$)", re.IGNORECASE)
+
+
+def _entry_image(entry: Mapping, base_url: str) -> str:
+    """The biggest picture a feed item carries (media:content, enclosure, <img>…)."""
+    candidates: list[tuple[int, str]] = []
+    for media in entry.get("media_content") or ():
+        url, kind = media.get("url") or "", (media.get("type") or media.get("medium") or "")
+        if url and ("image" in kind or _IMAGE_EXT_RE.search(url)):
+            candidates.append((_int(media.get("width")), url))
+    for media in entry.get("media_thumbnail") or ():
+        if media.get("url"):
+            candidates.append((_int(media.get("width")) or 1, media["url"]))
+    for link in entry.get("links") or ():
+        if link.get("rel") == "enclosure" and "image" in (link.get("type") or "") \
+                and link.get("href"):
+            candidates.append((2, link["href"]))
+    if not candidates:
+        for text in [entry.get("summary") or ""] + [c.get("value") or ""
+                                                    for c in entry.get("content") or ()]:
+            match = _IMG_RE.search(text)
+            if match:
+                candidates.append((0, html.unescape(match.group(1))))
+                break
+    for _, url in sorted(candidates, key=lambda item: -item[0]):
+        url = urljoin(base_url, url.strip())
+        if is_http_url(url):
+            return url
+    return ""
+
+
+def _int(value: object) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def parse_feed(source: Source, body: bytes, content_type: str, now: int) -> list[Candidate]:
     """Parse a feed document. Runs in a worker thread — must not touch the event loop."""
     headers = {"content-type": content_type} if content_type else None
@@ -134,6 +177,7 @@ def parse_feed(source: Source, body: bytes, content_type: str, now: int) -> list
             summary=_entry_summary(entry, title),
             tags=tags,
             published_at=_entry_time(entry, now),
+            image=_entry_image(entry, url),
         ))
     return candidates
 
@@ -322,6 +366,7 @@ class NewsCollector:
 
         return NewsRecord(
             id=c.id, source=c.source.key, lang=c.source.lang, url=c.url, title=c.title,
+            image=c.image,
             summary=c.summary, published_at=c.published_at, fetched_at=now, status=status,
             categories=categories or result.categories, entities=result.entities[:6],
             fingerprint=fingerprint, relevant=relevant, dup_of=dup_of,

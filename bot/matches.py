@@ -24,6 +24,7 @@ _SEEDED_LEAGUES_KEY = "seeded_leagues"
 _DIGEST_KEY = "digest_sent_on"
 
 SendFn = Callable[[str], Awaitable[bool]]
+ResultSendFn = Callable[[Match, Category], Awaitable[bool]]
 
 
 def tracked_leagues(settings: BotSettings) -> list[Category]:
@@ -67,9 +68,11 @@ class MatchService:
                 return self._interval  # just ended, final status not published yet
         return IDLE_POLL_SEC
 
-    async def poll_results(self, send: SendFn, render: Callable[[Match, Category], str], *,
-                           force: bool = False) -> int:
-        """Send results of matches that finished since the last poll."""
+    async def poll_results(self, send: ResultSendFn, *, force: bool = False) -> int:
+        """Send results of matches that finished since the last poll.
+
+        ``send(match, league)`` delivers one result (text, card…) and returns whether it
+        reached anyone."""
         settings = await self._settings.get()
         if not settings.results or settings.paused:
             return 0
@@ -112,7 +115,7 @@ class MatchService:
                 for match in fresh:
                     if (await self._settings.get()).paused:
                         return sent
-                    delivered = await send(render(match, league))
+                    delivered = await send(match, league)
                     await self._db.add_match(
                         match.id, league.key, int(match.kickoff.timestamp()),
                         MatchStatus.SENT if delivered else MatchStatus.FAILED, int(time.time()),
@@ -122,6 +125,24 @@ class MatchService:
             if seeded != seeded_before:
                 await self._db.set_value(_SEEDED_LEAGUES_KEY, sorted(seeded))
         return sent
+
+    async def find_match(self, event_id: str) -> tuple[Match, Category] | None:
+        """A match the bot has reported before, fetched fresh from ESPN."""
+        known = await self._db.get_match(event_id)
+        if known is None:
+            return None
+        league = next((c for c in CATEGORIES if c.key == known[0] and c.espn_code), None)
+        if league is None:
+            return None
+        day = datetime.fromtimestamp(known[1], timezone.utc).date()
+        try:
+            matches = await self._espn.matches_on(
+                league.espn_code or "", (day - timedelta(days=1), day, day + timedelta(days=1)))
+        except FetchError as exc:
+            log.warning("Не удалось получить матч %s: %s", event_id, exc)
+            return None
+        match = next((m for m in matches if m.id == event_id), None)
+        return (match, league) if match else None
 
     # ----------------------------------------------------------------- overview
 

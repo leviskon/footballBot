@@ -18,14 +18,16 @@ from aiogram.exceptions import TelegramAPIError, TelegramUnauthorizedError
 from aiogram.types import BotCommand, InlineKeyboardMarkup, User
 
 from .access import Access
+from .cardmaker import CardMaker
+from .catalog import Category
 from .classifier import Classifier
 from .config import Config
-from .espn import EspnClient
+from .espn import EspnClient, Match
 from .matches import MatchService
 from .net import HttpClient
 from .news import MAX_DELIVERY_ATTEMPTS, CycleReport, NewsCollector
 from .notifier import DeliveryError, Notifier
-from .render import render_day, render_news, render_result
+from .render import CAPTION_LIMIT, plain_len, render_day, render_news, render_result
 from .keyboards import match_keyboard, news_keyboard
 from .settings import SettingsStore
 from .storage import NewsRecord, Storage
@@ -63,6 +65,7 @@ class App:
                                     interval=config.matches_interval,
                                     digest_time=config.digest_time)
         self.writer = make_writer(config, http)
+        self.cards = CardMaker(http, db, self.writer, brand=config.card_brand)
         self.started_at = time.time()
         self.bot_username = ""
         self._news_lock = asyncio.Lock()
@@ -88,9 +91,21 @@ class App:
     async def _send_text(self, text: str) -> bool:
         return await self.notifier.broadcast(text)
 
-    async def _send_result(self, text: str) -> bool:
-        keyboard = match_keyboard() if self.writer is not None else None
-        return await self.notifier.broadcast(text, keyboard=keyboard)
+    async def _send_result(self, match: Match, league: Category) -> bool:
+        """A finished match: the branded card with the result as its caption."""
+        text = render_result(match, league)
+        keyboard = match_keyboard(match.id) if self.writer is not None else None
+        try:
+            card = await self.cards.make(match, league)
+        except Exception:
+            log.exception("Не удалось нарисовать карточку матча %s", match.id)
+            card = None
+        if card is None:
+            return await self.notifier.broadcast(text, keyboard=keyboard)
+        if plain_len(text) <= CAPTION_LIMIT:
+            return await self.notifier.broadcast_photo(card, text, keyboard=keyboard)
+        sent = await self.notifier.broadcast_photo(card)
+        return await self.notifier.broadcast(text, keyboard=keyboard) or sent
 
     async def send_latest(self, chat_id: int, count: int) -> int:
         """Send up to ``count`` of the freshest stories that were never sent before.
@@ -141,7 +156,7 @@ class App:
     async def results_cycle(self, *, force: bool = False) -> int:
         async with self._results_lock:
             try:
-                sent = await self.matches.poll_results(self._send_result, render_result, force=force)
+                sent = await self.matches.poll_results(self._send_result, force=force)
             except DeliveryError as exc:
                 log.warning("Telegram недоступен (%s) — результаты отправлю позже", exc)
                 return 0

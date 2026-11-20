@@ -48,8 +48,9 @@ REMOVE_MENU = ReplyKeyboardRemove()
 
 class NewsAction(CallbackData, prefix="n"):
     # "take" | "del" | "noop" — news buttons;
-    # "post" — write a post about news ``item``; "mpost" — about the match result in this
-    # message; "repost" / "rempost" — another version of the post in this message.
+    # "post" — write a post about news ``item``; "mpost" — about ESPN match ``item`` ("0" in
+    # older messages: the result text of this message); "repost" / "rempost" — another
+    # version of the post in this message.
     action: str
     item: str
 
@@ -82,17 +83,20 @@ def news_keyboard(item_id: str, url: str, *, taken: bool = False,
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def match_keyboard() -> InlineKeyboardMarkup:
-    """Under a match result: write a post from the result in this message."""
+def match_keyboard(match_id: str) -> InlineKeyboardMarkup:
+    """Under a match result: write a post (with the result card) about ESPN match ``match_id``."""
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text=POST_BUTTON, callback_data=NewsAction(action="mpost", item="0").pack())]])
+        text=POST_BUTTON, callback_data=NewsAction(action="mpost", item=match_id).pack())]])
 
 
-def post_keyboard(item: str | None) -> InlineKeyboardMarkup:
-    """Under a written post: another version. ``item`` is the news id, None for a match post
-    (its source is the result message the post replies to)."""
-    action = NewsAction(action="repost", item=item) if item else NewsAction(action="rempost",
-                                                                              item="0")
+def post_keyboard(*, news_id: str | None = None,
+                  match_id: str | None = None) -> InlineKeyboardMarkup:
+    """Under a written post: another version of it. Without ids it is a post about a match
+    from an older message, whose result text the post replies to."""
+    if news_id:
+        action = NewsAction(action="repost", item=news_id)
+    else:
+        action = NewsAction(action="rempost", item=match_id or "0")
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
         text="🔄 Другой вариант", callback_data=action.pack())]])
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 from collections.abc import Iterable, Sequence
 from datetime import date, datetime, tzinfo
 
@@ -12,6 +14,7 @@ from .storage import NewsRecord
 from .textutil import esc, fold, hashtag, truncate
 
 MESSAGE_LIMIT = 4000  # Telegram allows 4096; keep a margin for entities
+CAPTION_LIMIT = 1024  # photo captions, counted in UTF-16 code units after HTML parsing
 NEWS_SUMMARY_LIMIT = 700
 
 _MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
@@ -177,3 +180,40 @@ def render_post(post: str, signature: str = "") -> str:
     if signature.strip():
         text += f"\n\n\n{esc(signature.strip())}"
     return truncate(text, MESSAGE_LIMIT) if len(text) > MESSAGE_LIMIT else text
+
+
+def tg_len(text: str) -> int:
+    """Length as Telegram counts it (UTF-16 code units: most emoji take two)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def plain_len(html_text: str) -> int:
+    return tg_len(html.unescape(re.sub(r"<[^>]+>", "", html_text)))
+
+
+def fit_post(post: str, signature: str = "", limit: int = CAPTION_LIMIT) -> str:
+    """:func:`render_post` that fits a photo caption: trailing paragraphs are dropped first,
+    then the remaining text is shortened at a sentence boundary."""
+    headline, _, body = post.strip().partition("\n")
+    blank = body.startswith("\n")
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body.strip("\n")) if p.strip()]
+    tail = f"\n\n\n{signature.strip()}" if signature.strip() else ""
+
+    def assemble(parts: list[str]) -> str:
+        if not parts:
+            return headline
+        return headline + ("\n\n" if blank else "\n") + "\n\n".join(parts)
+
+    while len(paragraphs) > 1 and tg_len(assemble(paragraphs) + tail) > limit:
+        paragraphs.pop()
+    if paragraphs and tg_len(assemble(paragraphs) + tail) > limit:
+        room = limit - tg_len(assemble([]) + tail) - 4
+        while room > 20:
+            shortened = truncate(paragraphs[0], room)
+            if tg_len(assemble([shortened]) + tail) <= limit:
+                paragraphs = [shortened]
+                break
+            room -= 20
+        else:
+            paragraphs = []
+    return render_post(assemble(paragraphs), signature)

@@ -41,6 +41,7 @@ class Config:
     groq_token: str | None = None
     groq_models: tuple[str, ...] = ()
     post_signature: str = ""
+    card_brand: str = ""
 
 
 def _env(name: str) -> str:
@@ -171,4 +172,5 @@ def load_config(*, require_token: bool = True) -> Config:
         groq_token=_env("GROQ_TOKEN") or _env("GROQ_API_KEY") or _env("GROQ_API") or None,
         groq_models=_list_env("GROQ_MODELS", DEFAULT_GROQ_MODELS),
         post_signature=_env("POST_SIGNATURE").replace("\\n", "\n"),
+        card_brand=_env("CARD_BRAND"),
     )

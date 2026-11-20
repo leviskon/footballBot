@@ -240,19 +240,20 @@ def test_results_are_seeded_then_sent_once(tmp_path):
 
         sent: list[str] = []
 
-        async def send(text):
-            sent.append(text)
+        async def send(match, league):
+            sent.append(f"{league.key}:{match.id}")
             return True
 
-        def render(match, league):
-            return f"{league.key}:{match.id}"
-
-        assert await service.poll_results(send, render, force=True) == 0  # seeding
+        assert await service.poll_results(send, force=True) == 0  # seeding
         espn.matches.append(make_match("new", final=True, kickoff=kickoff))
         espn.matches.append(make_match("later", final=False, kickoff=kickoff + timedelta(hours=3)))
-        assert await service.poll_results(send, render, force=True) == 1
-        assert await service.poll_results(send, render, force=True) == 0
+        assert await service.poll_results(send, force=True) == 1
+        assert await service.poll_results(send, force=True) == 0
         assert sent == ["epl:new"]
+        assert await db.get_match("new") == ("epl", int(kickoff.timestamp()))
+        found = await service.find_match("new")  # «✍️ Сделать пост» under the result
+        assert found is not None and found[0].id == "new" and found[1].key == "epl"
+        assert await service.find_match("unknown") is None
 
         # Digest: sent once per day, inside the window after DIGEST_TIME.
         digests: list[str] = []
@@ -340,6 +341,51 @@ def test_latest_button_never_repeats_news(tmp_path):
         assert await app.send_latest(1, 5) == 0
         await app.news_cycle()
         assert notifier.sent == first
+        await db.close()
+
+    run(scenario())
+
+
+def test_feed_item_picture_is_kept():
+    now = int(time.time())
+    body = (
+        '<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">'
+        "<channel><title>t</title>"
+        "<item><title>«Реал» продлил контракт</title><link>https://ru.example/a</link>"
+        '<media:thumbnail url="https://img.example/small.jpg" width="240"/>'
+        '<media:content url="https://img.example/big.jpg" medium="image" width="1200"/></item>'
+        "<item><title>«Барселона» выиграла</title><link>https://ru.example/b</link>"
+        '<enclosure url="https://img.example/enc.jpg" type="image/jpeg" length="1"/></item>'
+        "<item><title>«Бавария» сыграла</title><link>https://ru.example/c</link>"
+        "<description>&lt;p&gt;&lt;img src=\"/i/c.png\"&gt;Текст&lt;/p&gt;</description></item>"
+        "<item><title>Без картинки</title><link>https://ru.example/d</link></item>"
+        "</channel></rss>"
+    ).encode()
+    images = [c.image for c in parse_feed(RU, body, "application/rss+xml", now)]
+    assert images == ["https://img.example/big.jpg", "https://img.example/enc.jpg",
+                      "https://ru.example/i/c.png", ""]
+
+
+def test_old_database_gets_the_image_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE news (id TEXT PRIMARY KEY, source TEXT NOT NULL, lang TEXT NOT NULL,"
+                 " url TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',"
+                 " categories TEXT NOT NULL DEFAULT '', entities TEXT NOT NULL DEFAULT '',"
+                 " fingerprint TEXT NOT NULL DEFAULT '', relevant INTEGER NOT NULL DEFAULT 0,"
+                 " status TEXT NOT NULL, dup_of TEXT, attempts INTEGER NOT NULL DEFAULT 0,"
+                 " published_at INTEGER NOT NULL, fetched_at INTEGER NOT NULL, sent_at INTEGER)")
+    conn.execute("INSERT INTO news(id, source, lang, url, title, status, published_at, fetched_at)"
+                 " VALUES('x', 'ru1', 'ru', 'https://ru.example/x', 'Старая', 'sent', 1, 1)")
+    conn.commit()
+    conn.close()
+
+    async def scenario():
+        db = await Storage.open(path)
+        record = await db.get_news("x")
+        assert record is not None and record.title == "Старая" and record.image == ""
         await db.close()
 
     run(scenario())

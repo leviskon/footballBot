@@ -10,7 +10,7 @@ from typing import Any
 
 import aiosqlite
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS news (
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS news (
     categories   TEXT NOT NULL DEFAULT '',
     entities     TEXT NOT NULL DEFAULT '',
     fingerprint  TEXT NOT NULL DEFAULT '',
+    image        TEXT NOT NULL DEFAULT '',
     relevant     INTEGER NOT NULL DEFAULT 0,
     status       TEXT NOT NULL,
     dup_of       TEXT,
@@ -88,13 +89,14 @@ class NewsRecord:
     dup_of: str | None = None
     attempts: int = 0
     sent_at: int | None = None
+    image: str = ""  # picture from the feed item (a fallback for the article's own photo)
 
     def to_row(self) -> tuple[Any, ...]:
         return (
             self.id, self.source, self.lang, self.url, self.title, self.summary,
             ",".join(self.categories), "|".join(self.entities), " ".join(sorted(self.fingerprint)),
             int(self.relevant), self.status, self.dup_of, self.attempts,
-            self.published_at, self.fetched_at, self.sent_at,
+            self.published_at, self.fetched_at, self.sent_at, self.image,
         )
 
     @classmethod
@@ -116,12 +118,13 @@ class NewsRecord:
             dup_of=row["dup_of"],
             attempts=row["attempts"],
             sent_at=row["sent_at"],
+            image=row["image"] or "",
         )
 
 
 _NEWS_COLUMNS = (
     "id, source, lang, url, title, summary, categories, entities, fingerprint, relevant, "
-    "status, dup_of, attempts, published_at, fetched_at, sent_at"
+    "status, dup_of, attempts, published_at, fetched_at, sent_at, image"
 )
 
 
@@ -143,6 +146,9 @@ class Storage:
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA synchronous=NORMAL")
         await conn.executescript(_SCHEMA)
+        columns = {row[1] for row in await conn.execute_fetchall("PRAGMA table_info(news)")}
+        if "image" not in columns:  # databases created before version 2
+            await conn.execute("ALTER TABLE news ADD COLUMN image TEXT NOT NULL DEFAULT ''")
         await conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         await conn.commit()
         return cls(conn)
@@ -196,7 +202,7 @@ class Storage:
     async def add_news(self, records: Sequence[NewsRecord]) -> None:
         if not records:
             return
-        marks = ",".join("?" * 16)
+        marks = ",".join("?" * 17)
         await self._db.executemany(
             f"INSERT OR IGNORE INTO news({_NEWS_COLUMNS}) VALUES({marks})",
             [record.to_row() for record in records],
@@ -297,6 +303,19 @@ class Storage:
             "VALUES(?, ?, ?, ?, ?)",
             (event_id, league, kickoff, status, created_at),
         )
+
+    async def get_match(self, event_id: str) -> tuple[str, int] | None:
+        """``(league key, kickoff timestamp)`` of a match the bot has seen."""
+        rows = await self._db.execute_fetchall(
+            "SELECT league, kickoff FROM matches WHERE event_id = ?", (event_id,))
+        return (rows[0]["league"], int(rows[0]["kickoff"])) if rows else None
+
+    async def news_between(self, since: int, until: int, limit: int = 300) -> list[NewsRecord]:
+        """Stories published in a time window, newest first (any status)."""
+        rows = await self._db.execute_fetchall(
+            f"SELECT {_NEWS_COLUMNS} FROM news WHERE published_at BETWEEN ? AND ? "
+            "ORDER BY published_at DESC LIMIT ?", (since, until, limit))
+        return [NewsRecord.from_row(row) for row in rows]
 
     async def count_matches_sent(self, since: int) -> int:
         rows = await self._db.execute_fetchall(

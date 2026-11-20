@@ -8,18 +8,21 @@ quota or unreachable, the next one is used.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Protocol
+from urllib.parse import urljoin
 
 from .net import FetchError, HttpClient
 from .sources import SOURCE_BY_KEY
 from .storage import NewsRecord
-from .textutil import clean_whitespace, truncate
+from .textutil import clean_whitespace, is_http_url, truncate
 
 log = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ STYLE = """Ты — редактор русскоязычного футболь
 Как писать:
 - Только на русском, даже если источник на другом языке. Имена игроков и названия клубов — в принятом русском написании, клубы в «ёлочках».
 - Первая строка — короткий заголовок (до 10–12 слов) ЗАГЛАВНЫМИ БУКВАМИ, в начале одно подходящее эмодзи (🚨 — громкое или скандал, ❗️ — инсайд или важное заявление, 💰 — трансфер, 🤕 — травма, 🔥 — яркое событие, ⚽️ — остальное). Заголовок передаёт главный факт, а не цитату целиком.
-- Дальше 1–3 коротких абзаца простым, понятным языком: в чём суть, нужный контекст, почему это важно. Не слишком длинно и не слишком коротко — примерно 250–600 знаков без заголовка.
+- Дальше 1–3 коротких абзаца простым, понятным языком: в чём суть, нужный контекст, почему это важно. Пост идёт подписью к фото, поэтому весь он вместе с заголовком — 350–750 знаков, не больше.
 - Если в тексте сказано, на кого ссылается новость (инсайдер, другое СМИ, клуб, сам игрок), укажи этот первоисточник: «Об этом сообщает …» или начни пост с «❗️Имя инсайдера:». Сайт, с которого взята новость (он указан в поле «Источник»), в посте не упоминай.
 - Эмодзи 2–4 на весь пост, не перегибай.
 - Только факты из присланного текста. Не добавляй ничего от себя: ни клубов, ни возраста, ни дат, ни подробностей, которых в тексте нет.
@@ -78,6 +81,15 @@ MATCH_TASK = """Сделай пост об итоге матча.
 🇩🇪 ГЕРМАНИЯ РАЗГРОМИЛА НИДЕРЛАНДЫ — 5:0! 🔥
 Глагол подбери по счёту и ходу игры (обыграла, разгромила, вырвала победу, сыграли вничью…).
 Ниже коротко: кто забил (с минутами), удаления, если были, и чем результат важен, если это понятно из данных. Ничего не выдумывай."""
+
+
+NAMES_SYSTEM = """Ты переводишь имена футболистов на русский язык так, как их пишут русские спортивные СМИ (Sports.ru, «Чемпионат», «Спорт-Экспресс»)."""
+
+NAMES_TASK = """Для каждого имени из списка дай фамилию по-русски в принятом написании, без имени: «Florian Wirtz» → «Вирц», «Virgil van Dijk» → «ван Дейк», «Vinícius Júnior» → «Винисиус», «Rodri» → «Родри».
+Верни только JSON-объект: ключ — имя ровно как в списке, значение — фамилия по-русски.
+
+Список:
+"""
 
 
 def news_prompt(record: NewsRecord, article: str) -> str:
@@ -151,6 +163,29 @@ class _ArticleParser(HTMLParser):
     def close(self) -> None:
         super().close()
         self._flush()
+
+
+_META_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_ATTR_RE = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_IMAGE_KEYS = ("og:image:secure_url", "og:image", "og:image:url", "twitter:image",
+               "twitter:image:src")
+
+
+def extract_image(html: str, base_url: str) -> str | None:
+    """The main picture of a page (Open Graph / Twitter card), as an absolute URL."""
+    found: dict[str, str] = {}
+    for tag in _META_RE.findall(html[:300_000]):
+        attrs = {m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3)
+                 for m in _ATTR_RE.finditer(tag)}
+        key = (attrs.get("property") or attrs.get("name") or "").lower()
+        if key in _IMAGE_KEYS and attrs.get("content") and key not in found:
+            found[key] = unescape(attrs["content"].strip())
+    for key in _IMAGE_KEYS:
+        if key in found:
+            url = urljoin(base_url, found[key])
+            if is_http_url(url):
+                return url
+    return None
 
 
 def extract_article(html: str, limit: int = ARTICLE_LIMIT) -> str:
@@ -268,6 +303,26 @@ def clean_post(text: str) -> str:
     return text
 
 
+@dataclass(frozen=True, slots=True)
+class Post:
+    text: str
+    images: tuple[str, ...] = ()  # pictures to try, best first (the article's, the feed's)
+
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    """The first JSON object in a model answer (models like to wrap it in ```json fences)."""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise LLMError("в ответе нет JSON")
+    try:
+        data = json.loads(text[start:end + 1])
+    except ValueError:
+        raise LLMError("ответ не является JSON") from None
+    if not isinstance(data, dict):
+        raise LLMError("ответ не является JSON-объектом")
+    return data
+
+
 class PostWriter:
     def __init__(self, http: HttpClient, providers: Sequence[Provider]) -> None:
         if not providers:
@@ -280,13 +335,14 @@ class PostWriter:
     def provider_names(self) -> list[str]:
         return [p.name for p in self._providers]
 
-    async def _article(self, url: str) -> str:
+    async def _article(self, url: str) -> tuple[str, str | None]:
+        """The article's text and main picture (empty when the page cannot be loaded)."""
         try:
             html = await self._http.fetch_text(url, timeout=ARTICLE_TIMEOUT_SEC)
         except FetchError as exc:
             log.info("Не удалось скачать статью %s: %s — пишу по анонсу", url, exc)
-            return ""
-        return extract_article(html)
+            return "", None
+        return extract_article(html), extract_image(html, url)
 
     def _order(self) -> list[Provider]:
         """Providers to try: resting ones go last (they are still better than nothing)."""
@@ -294,11 +350,12 @@ class PostWriter:
         ready = [p for p in self._providers if self._resting.get(p.name, 0.0) <= now]
         return ready + [p for p in self._providers if p not in ready]
 
-    async def _generate(self, prompt: str) -> str:
+    async def _generate(self, prompt: str, system: str = STYLE, *, raw: bool = False) -> str:
         errors: list[str] = []
         for provider in self._order():
             try:
-                post = clean_post(await provider.generate(STYLE, prompt))
+                answer = await provider.generate(system, prompt)
+                post = answer.strip() if raw else clean_post(answer)
             except (LLMError, FetchError) as exc:
                 log.warning("%s не написал пост: %s", provider.name, exc)
                 errors.append(f"{provider.name}: {exc}")
@@ -312,9 +369,21 @@ class PostWriter:
             errors.append(f"{provider.name}: пустой ответ")
         raise LLMError("; ".join(errors))
 
-    async def news_post(self, record: NewsRecord) -> str:
-        article = await self._article(record.url)
-        return await self._generate(news_prompt(record, article))
+    async def news_post(self, record: NewsRecord) -> Post:
+        article, image = await self._article(record.url)
+        images = tuple(dict.fromkeys(url for url in (image, record.image) if url))
+        return Post(await self._generate(news_prompt(record, article)), images)
 
     async def match_post(self, result_text: str) -> str:
         return await self._generate(match_prompt(result_text))
+
+    async def russian_surnames(self, names: Sequence[str]) -> dict[str, str]:
+        """Russian surnames for player names as ESPN writes them (only the ones the model
+        returned; the caller falls back to the original for the rest)."""
+        names = [n for n in dict.fromkeys(names) if n]
+        if not names:
+            return {}
+        answer = await self._generate(NAMES_TASK + "\n".join(names), NAMES_SYSTEM, raw=True)
+        data = parse_json_object(answer)
+        return {name: str(data[name]).strip() for name in names
+                if isinstance(data.get(name), str) and data[name].strip()}

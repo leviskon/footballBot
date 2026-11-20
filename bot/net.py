@@ -114,6 +114,19 @@ class HttpClient:
         except LookupError:
             return body.decode("utf-8", errors="replace")
 
+    async def fetch_bytes(self, url: str, *, timeout: float | None = None) -> bytes:
+        """Download a binary file (a logo or a photo)."""
+        try:
+            async with self._client.get(url, headers={"Accept": "image/*,*/*;q=0.5"},
+                                        **_timeout(timeout)) as resp:
+                if resp.status != 200:
+                    raise FetchError(f"HTTP {resp.status}")
+                return await self._read(resp)
+        except TimeoutError:
+            raise FetchError("таймаут") from None
+        except aiohttp.ClientError as exc:
+            raise FetchError(_describe(exc)) from exc
+
     async def post_json(self, url: str, payload: Any, *, headers: dict[str, str] | None = None,
                         timeout: float | None = None) -> tuple[int, Any]:
         """POST a JSON body. Returns ``(status, parsed JSON or None)``; raises only on network
