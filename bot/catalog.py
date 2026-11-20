@@ -201,7 +201,7 @@ SERIEA = Category(
         E("Торино", "торино", "torino", espn="Torino"),
         E("Удинезе", "удинезе", "udinese", espn="Udinese"),
         E("Дженоа", "дженоа", "genoa", espn="Genoa"),
-        E("Комо", "комо", "=Como", espn="Como"),
+        E("Комо", "комо", r"=re:(?<!^)(?<![.!?¿¡\n])(?<![.!?¿¡]\s)Como", espn="Como"),
         E("Кальяри", "кальяри", "cagliari", espn="Cagliari"),
         E("Лечче", "лечче", "lecce", espn="Lecce"),
         E("Парма", r"re:парм(а|ы|е|у|ой)(?!\w)", "parma", espn="Parma"),
@@ -253,7 +253,9 @@ UCL = Category(
     emoji="🏆",
     tag="ЛЧ",
     espn_code="uefa.champions",
-    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Чч]емпионов", "=ЛЧ", "champions league", "=UCL"),
+    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Чч]емпионов", "=ЛЧ", "champions league", "=UCL",
+              "liga de campeones", "ligue des champions",
+              r"re:(la|di|in|en|de|del|der|von) champions(?!\w)(?![\s\-]+(cup|trophy))"),
 )
 
 UEL = Category(
@@ -263,7 +265,8 @@ UEL = Category(
     emoji="🟠",
     tag="ЛЕ",
     espn_code="uefa.europa",
-    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+Европы", "=ЛЕ", "europa league", "=UEL"),
+    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+Европы", "=ЛЕ", "europa league", "=UEL",
+              r"re:(liga|ligue)[\s\-]+europa(?![\s\-]+conf)"),
 )
 
 UECL = Category(
@@ -273,7 +276,8 @@ UECL = Category(
     emoji="🟢",
     tag="ЛК",
     espn_code="uefa.europa.conf",
-    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Кк]онференций", "=ЛК", "conference league", "=UECL"),
+    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Кк]онференций", "=ЛК", "conference league", "=UECL",
+              r"re:(liga|ligue)[\s\-]+europa[\s\-]+conf\w*"),
 )
 
 UNL = Category(
@@ -283,7 +287,8 @@ UNL = Category(
     emoji="🌍",
     tag="ЛигаНаций",
     espn_code="uefa.nations",
-    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Нн]аций", "nations league"),
+    keywords=(r"=re:Лиг(а|и|у|е|ой)[\s\-]+[Нн]аций", "nations league", "ligue des nations",
+              "liga de naciones"),
 )
 
 # ------------------------------------------------------------- star players & coaches
@@ -362,13 +367,19 @@ EXCLUDE_ALIASES: tuple[str, ...] = (
     "q:ростов*", "q:рубин*", "q:ахмат*", "крыль* советов", "q:оренбург*", "q:факел*",
     "пари нн", "q:акрон*", "q:балтик*", "q:сочи", "q:урал*", "q:торпедо", "q:родин*",
     "q:химки", "q:енисе*", "q:шинник*", "q:камаз*",
-    "scottish", "=EFL", "=Championship", "league one", "league two", "saudi",
+    "scottish", "=EFL", "=Championship", "league one", "league two", "saudi", "saudit*",
 )
 
 # Never sent, whatever the settings (checked against the title only).
 HARD_EXCLUDE_ALIASES: tuple[str, ...] = (
     "женск*", r"re:women'?s?(?!\w)", "=WSL", "=NWSL", "юношеск*", "молодежн*",
-    "youth league", r"re:u-?(17|19|20|21|23)(?!\d)",
+    "youth league", r"re:u[\s\-]?(17|19|20|21|23)(?!\d)",
+    # the same in Spanish, Italian, German and French
+    "femenin*", "femminil*", "frauen*", "feminin*", "=Liga F", "juvenil*", "=Primavera",
+    r"re:(sub|under)[\s\-]?(17|19|20|21|23)(?!\d)",
+    # other sports that general sports feeds mix in
+    "baloncesto", "basket*", "handball*", "balonmano", "pallavolo", "volley*", "=NBA", "=ACB",
+    "euroliga", "euroleague", "eishockey", "motogp", "formula 1", "formule 1",
 )
 
 # Russian names for teams that ESPN reports in English (top-5 league clubs come from

@@ -20,7 +20,7 @@ from .keyboards import (
     REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, news_keyboard, settings_keyboard,
 )
 from .notifier import DeliveryError
-from .render import render_day, render_news
+from .render import render_day
 from .sources import LANGUAGE_NAMES, LANGUAGES
 from .textutil import esc
 
@@ -106,20 +106,15 @@ async def run_check(message: Message, app: App) -> None:
 
 
 async def _send_latest(message: Message, app: App, count: int) -> None:
-    settings = await app.settings.get()
-    records = await app.db.latest_news(count, settings.categories)
-    if not records:
-        await message.answer("Пока нечего показать — новости появятся после первой проверки. "
-                             "Запустить её сейчас: «🔄 Проверить сейчас».",
-                             reply_markup=await _menu(app))
-        return
     try:
-        for record in reversed(records):  # oldest first, so the newest ends up at the bottom
-            await app.notifier.send(message.chat.id, render_news(record, app.config.tz),
-                                    keyboard=news_keyboard(record.id, record.url),
-                                    preview_url=record.url)
+        sent = await app.send_latest(message.chat.id, count)
     except DeliveryError as exc:
         log.warning("Не удалось отправить последние новости: %s", exc)
+        return
+    if not sent:
+        await message.answer("Новых новостей нет — всё свежее я уже присылал. "
+                             "Следующие придут сами, как только выйдут.",
+                             reply_markup=await _menu(app))
 
 
 async def show_latest(message: Message, app: App) -> None:

@@ -75,6 +75,11 @@ def _mark(enabled: bool) -> str:
     return "✅" if enabled else "▫️"
 
 
+def _pairs(count: int) -> list[int]:
+    """Row sizes that lay ``count`` buttons out two per row."""
+    return [2] * (count // 2) + ([1] if count % 2 else [])
+
+
 def settings_keyboard(settings: BotSettings) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for category in CATEGORIES:
@@ -95,6 +100,5 @@ def settings_keyboard(settings: BotSettings) -> InlineKeyboardMarkup:
                    callback_data=SettingsAction(kind="flag", value="digest"))
     builder.button(text="Готово", callback_data=SettingsAction(kind="close", value="-"))
 
-    category_rows = [2] * (len(CATEGORIES) // 2) + ([1] if len(CATEGORIES) % 2 else [])
-    builder.adjust(*category_rows, 1, len(LANGUAGES), 2, 1)
+    builder.adjust(*_pairs(len(CATEGORIES)), 1, *_pairs(len(LANGUAGES)), 2, 1)
     return builder.as_markup()

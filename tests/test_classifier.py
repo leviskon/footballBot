@@ -87,3 +87,31 @@ def test_every_alias_compiles():
 def test_entity_names_are_unique():
     names = [e.name for c in CATEGORIES for e in c.entities]
     assert len(names) == len(set(names)) == len(ENTITY_BY_NAME)
+
+
+@pytest.mark.parametrize("title, categories, entities", [
+    ("El Real Madrid golea en la Champions", ["laliga", "ucl"], ["Реал Мадрид"]),
+    ("La Real Sociedad en Liga Europa", ["laliga", "uel"], ["Реал Сосьедад"]),
+    ("Ligue Europa Conference : Strasbourg qualifié", ["uecl", "ligue1"], ["Страсбур"]),
+    ("Ligue des nations : la France en quarts", ["unl"], []),
+    ("El Como de Fàbregas gana al Cagliari", ["seriea"], ["Комо", "Кальяри"]),
+])
+def test_foreign_language_classification(title, categories, entities):
+    result = classifier.classify(title)
+    assert list(result.categories) == categories
+    assert list(result.entities) == entities
+
+
+def test_spanish_como_is_not_the_club():
+    assert "Комо" not in classifier.classify("Cómo ver el Barça - Real Madrid en TV").entities
+
+
+@pytest.mark.parametrize("title", [
+    "Bayern-Frauen gewinnen das Topspiel",
+    "Inacio fehlt Italiens U 21 monatelang",
+    "Juventus, la Primavera perde il derby",
+    "El Barça de baloncesto gana en Euroliga",
+    "Handball-Bundesliga: Kiel siegt",
+])
+def test_foreign_women_youth_and_other_sports_are_never_sent(title):
+    assert classifier.classify(title).hard_excluded

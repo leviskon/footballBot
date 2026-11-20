@@ -23,7 +23,7 @@ from .config import Config
 from .espn import EspnClient
 from .matches import MatchService
 from .net import HttpClient
-from .news import CycleReport, NewsCollector
+from .news import MAX_DELIVERY_ATTEMPTS, CycleReport, NewsCollector
 from .notifier import DeliveryError, Notifier
 from .render import render_day, render_news, render_result
 from .keyboards import news_keyboard
@@ -37,6 +37,8 @@ MINUTE_LOOP_SEC = 60
 EXIT_BAD_TOKEN = 3
 NEWS_RETENTION_DAYS = 14
 MATCH_RETENTION_DAYS = 30
+# «📰 Последние новости» offers unsent stories no older than this.
+LATEST_WINDOW_SEC = 24 * 3600
 _PRUNED_KEY = "pruned_on"
 
 # Everything else lives on the reply-keyboard menu; /start brings the menu back.
@@ -79,6 +81,30 @@ class App:
 
     async def _send_text(self, text: str) -> bool:
         return await self.notifier.broadcast(text)
+
+    async def send_latest(self, chat_id: int, count: int) -> int:
+        """Send up to ``count`` of the freshest stories that were never sent before.
+
+        Every story shown here is marked as sent, so neither the button nor the regular
+        delivery repeats it. Runs under the news lock: the background cycle cannot deliver
+        the same queued story at the same moment. Raises ``DeliveryError`` when Telegram is
+        unreachable. Returns how many stories were sent.
+        """
+        async with self._news_lock:
+            settings = await self.settings.get()
+            records = await self.db.latest_news(
+                count, settings.categories, since=int(time.time()) - LATEST_WINDOW_SEC)
+            sent = 0
+            for record in reversed(records):  # oldest first, so the newest ends up at the bottom
+                delivered = await self.notifier.send(
+                    chat_id, render_news(record, self.config.tz),
+                    keyboard=news_keyboard(record.id, record.url), preview_url=record.url)
+                if delivered:
+                    await self.db.mark_news_sent(record.id, int(time.time()))
+                    sent += 1
+                else:
+                    await self.db.register_news_failure(record.id, MAX_DELIVERY_ATTEMPTS)
+            return sent
 
     async def _is_paused(self) -> bool:
         return (await self.settings.get()).paused

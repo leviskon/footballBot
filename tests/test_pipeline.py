@@ -12,7 +12,7 @@ from bot.classifier import Classifier
 from bot.espn import Match, TeamScore
 from bot.matches import MatchService
 from bot.net import FeedResponse, FetchError
-from bot.news import MAX_DELIVERY_ATTEMPTS, NewsCollector
+from bot.news import MAX_DELIVERY_ATTEMPTS, NewsCollector, parse_feed
 from bot.settings import BotSettings, SettingsStore
 from bot.sources import Source
 from bot.storage import NewsStatus, Storage
@@ -281,6 +281,65 @@ def test_live_match_polls_often_idle_rarely(tmp_path):
                          kickoff=datetime.now(timezone.utc) + timedelta(days=2))
         assert service._next_delay([live], now) == 60
         assert service._next_delay([far], now) > 60
+        await db.close()
+
+    run(scenario())
+
+
+def test_topic_pages_are_skipped():
+    source = replace(RU, skip_urls=r"_DN-\d+\.html")
+    now = int(time.time())
+    body = rss(("Real Madrid", "https://site.example/football/real-madrid_DN-2023.html", now),
+               ("«Реал» продлил контракт с Вальверде", "https://site.example/news/1", now))
+    assert [c.title for c in parse_feed(source, body, "application/rss+xml", now)] == [
+        "«Реал» продлил контракт с Вальверде"]
+
+
+def test_latest_button_never_repeats_news(tmp_path):
+    from datetime import time as dtime
+    from pathlib import Path
+
+    from bot.app import App
+    from bot.config import Config
+
+    class FakeNotifier:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, chat_id, text, *, keyboard=None, preview_url=None):
+            self.sent.append(preview_url)
+            return True
+
+        async def broadcast(self, text, *, keyboard=None, preview_url=None):
+            self.sent.append(preview_url)
+            return True
+
+    async def scenario():
+        db = await Storage.open(tmp_path / "bot.sqlite3")
+        config = Config(bot_token="", admin_ids=frozenset({1}), tz=timezone.utc, tz_name="UTC",
+                        db_path=Path(tmp_path), log_dir=Path(tmp_path), log_level="INFO",
+                        news_interval=60, matches_interval=60, max_news_age_hours=3,
+                        digest_time=dtime(9), request_timeout=5)
+        app = App(config, bot=None, db=db, http=FakeHttp())
+        app.notifier = notifier = FakeNotifier()
+
+        now = int(time.time())
+        http = FakeHttp()
+        http.feeds[RU.url] = rss(
+            ("«Реал» продлил контракт с Вальверде до 2031 года", "https://ru.example/a", now - 60),
+            ("«Барселона» обыграла «Севилью» в матче Ла Лиги", "https://ru.example/b", now - 50),
+        )
+        app.collector = await make_collector(db, http)
+        await app.collector.collect()  # first run: stories are remembered (some queued as a sample)
+
+        assert await app.send_latest(1, 5) == 2
+        first = list(notifier.sent)
+        assert sorted(first) == ["https://ru.example/a", "https://ru.example/b"]
+
+        # Pressing the button again shows nothing, and regular delivery does not repeat them.
+        assert await app.send_latest(1, 5) == 0
+        await app.news_cycle()
+        assert notifier.sent == first
         await db.close()
 
     run(scenario())

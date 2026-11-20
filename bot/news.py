@@ -6,6 +6,7 @@ import asyncio
 import calendar
 import io
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -112,11 +113,12 @@ def parse_feed(source: Source, body: bytes, content_type: str, now: int) -> list
             raise FeedError(f"не RSS: {type(parsed.get('bozo_exception')).__name__}")
         return []
 
+    skip = re.compile(source.skip_urls) if source.skip_urls else None
     candidates: list[Candidate] = []
     for entry in parsed.entries:
         link = (entry.get("link") or "").strip()
         title = truncate(html_to_text(entry.get("title") or "").replace("\n", " "), TITLE_LIMIT)
-        if not title or not is_http_url(link):
+        if not title or not is_http_url(link) or (skip and skip.search(link)):
             continue
         url = clean_url(link)
         tags = tuple(

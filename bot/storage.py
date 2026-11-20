@@ -244,12 +244,16 @@ class Storage:
             (NewsStatus.EXPIRED, NewsStatus.PENDING, published_before),
         )
 
-    async def latest_news(self, limit: int, categories: set[str]) -> list[NewsRecord]:
-        """Most recent relevant stories (newest first) in the given categories."""
+    async def latest_news(self, limit: int, categories: set[str], *,
+                          since: int = 0) -> list[NewsRecord]:
+        """Most recent relevant stories not delivered yet (newest first) in the given categories.
+
+        Already sent stories are left out, so asking twice never shows the same news again.
+        """
         rows = await self._db.execute_fetchall(
-            f"SELECT {_NEWS_COLUMNS} FROM news WHERE relevant = 1 AND status IN (?, ?, ?) "
-            "ORDER BY published_at DESC LIMIT 300",
-            (NewsStatus.SENT, NewsStatus.PENDING, NewsStatus.SKIPPED),
+            f"SELECT {_NEWS_COLUMNS} FROM news WHERE relevant = 1 AND status IN (?, ?) "
+            "AND published_at >= ? ORDER BY published_at DESC LIMIT 300",
+            (NewsStatus.PENDING, NewsStatus.SKIPPED, since),
         )
         result: list[NewsRecord] = []
         for row in rows:
