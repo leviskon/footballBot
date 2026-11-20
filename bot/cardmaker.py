@@ -116,37 +116,38 @@ class CardMaker:
             return "после доп. времени"
         return ""
 
+    async def events(self, match: Match) -> tuple[list[CardEvent], list[CardEvent]]:
+        """Goals and red cards of each side in time order, with Russian surnames.
+
+        ESPN credits an own goal to the team that benefits from it."""
+        players = [g.player for g in match.goals] + [c.player for c in match.red_cards]
+        surnames = await self._surnames(players)
+        sides: dict[str, list[tuple[float, CardEvent]]] = {match.home.id: [], match.away.id: []}
+        for goal in match.goals:
+            if goal.team_id in sides:
+                kind = "og" if goal.own_goal else "pen" if goal.penalty else "goal"
+                sides[goal.team_id].append(
+                    (_minute_key(goal.minute), CardEvent(goal.minute, surnames[goal.player], kind)))
+        for card in match.red_cards:
+            if card.team_id in sides:
+                sides[card.team_id].append(
+                    (_minute_key(card.minute), CardEvent(card.minute, surnames[card.player], "red")))
+
+        def ordered(team_id: str) -> list[CardEvent]:
+            return [e for _, e in sorted(sides[team_id], key=lambda item: item[0])]
+
+        return ordered(match.home.id), ordered(match.away.id)
+
     async def make(self, match: Match, league: Category, *, hero: bool = True) -> bytes:
         """Render the result card of a finished match (JPEG bytes)."""
         home_name, away_name = team_name(match.home.name), team_name(match.away.name)
-        players = [g.player for g in match.goals] + [c.player for c in match.red_cards]
-        home_logo, away_logo, league_logo, hero_photo, surnames = await asyncio.gather(
-            self._asset(match.home.logo), self._asset(match.away.logo),
-            self._asset(match.league_logo),
-            self._hero(match, home_name, away_name) if hero else _none(),
-            self._surnames(players),
-        )
-
-        def side(team_id: str) -> str | None:
-            if team_id == match.home.id:
-                return "home"
-            if team_id == match.away.id:
-                return "away"
-            return None
-
-        events: dict[str, list[tuple[int, CardEvent]]] = {"home": [], "away": []}
-        for goal in match.goals:
-            # ESPN credits an own goal to the team that benefits from it
-            team = side(goal.team_id)
-            if team:
-                kind = "og" if goal.own_goal else "pen" if goal.penalty else "goal"
-                events[team].append((_minute_key(goal.minute),
-                                     CardEvent(goal.minute, surnames[goal.player], kind)))
-        for card in match.red_cards:
-            team = side(card.team_id)
-            if team:
-                events[team].append((_minute_key(card.minute),
-                                     CardEvent(card.minute, surnames[card.player], "red")))
+        home_logo, away_logo, league_logo, hero_photo, (home_events, away_events) = \
+            await asyncio.gather(
+                self._asset(match.home.logo), self._asset(match.away.logo),
+                self._asset(match.league_logo),
+                self._hero(match, home_name, away_name) if hero else _none(),
+                self.events(match),
+            )
 
         def card_team(team: TeamScore, name: str, logo: bytes | None) -> CardTeam:
             return CardTeam(name, logo, team.color, team.alt_color)
@@ -155,8 +156,7 @@ class CardMaker:
             home=card_team(match.home, home_name, home_logo),
             away=card_team(match.away, away_name, away_logo),
             home_score=match.home.score, away_score=match.away.score,
-            home_events=[e for _, e in sorted(events["home"], key=lambda item: item[0])],
-            away_events=[e for _, e in sorted(events["away"], key=lambda item: item[0])],
+            home_events=home_events, away_events=away_events,
             league_logo=league_logo, hero=hero_photo, note=self._note(match),
             brand=self._brand, brand_logo=self._brand_logo,
         )

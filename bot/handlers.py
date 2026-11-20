@@ -15,8 +15,8 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject, CommandStart, Filter, or_f
 from aiogram.types import (
-    BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message,
-    ReplyKeyboardMarkup,
+    BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+    LinkPreviewOptions, Message, ReplyKeyboardMarkup,
 )
 
 from . import texts
@@ -27,7 +27,8 @@ from .keyboards import (
 )
 from .notifier import DeliveryError
 from .render import fit_post, render_day, render_post, render_result
-from .sources import LANGUAGE_NAMES, LANGUAGES
+from .rich import match_html, news_html, rich_message, sent_photo
+from .sources import LANGUAGE_NAMES, LANGUAGES, SOURCE_BY_KEY
 from .storage import NewsRecord
 from .textutil import esc, html_to_text
 from .writer import LLMError, Post
@@ -248,6 +249,7 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
     regenerate = action in ("repost", "rempost")
     news_id = match_id = None
     match_info = None
+    match_events = None
     record: NewsRecord | None = None
     if action in ("post", "repost"):
         news_id = item
@@ -291,7 +293,7 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         kept_credit = _photo_credit(message.caption or "") if regenerate else ""
         if regenerate:
             target = message
-            await _set_text(target, "✍️ Пишу другой вариант…")
+            await _set_text(target, "✍️ Пишу другой вариант…", _progress_keyboard())
         else:
             target = await message.reply("✍️ Пишу пост, это займёт до минуты…")
         # the picture is looked for while the text is being written
@@ -300,6 +302,8 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
             photo_task = asyncio.create_task(app.photos.for_news(record))
         try:
             post = await write()
+            if match_info is not None:  # goals and red cards with Russian surnames, for the table
+                match_events = await app.cards.events(match_info[0])
         except LLMError as exc:
             if photo_task is not None:
                 photo_task.cancel()
@@ -318,14 +322,31 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
 
         signature = app.config.post_signature
         if regenerate:
-            if target.photo:
-                text = fit_post(post.text, _with_credit(signature, kept_credit))
+            if target.rich_message is not None:  # keep the photo and its credit
+                photo_id, credit = sent_photo(target)
+                html = _post_html(app, post, record, match_info, match_events,
+                                  with_photo=photo_id is not None, credit=credit)
+                await target.edit_text(rich_message=rich_message(html, photo_id),
+                                       reply_markup=keyboard)
+            elif target.photo:  # a post from an older version of the bot
+                await _set_text(target, fit_post(post.text, _with_credit(signature, kept_credit)),
+                                keyboard)
             else:
-                text = render_post(post.text, signature)
-            await _set_text(target, text, keyboard)
+                await _set_text(target, render_post(post.text, signature), keyboard)
             return
 
         photo, credit = await _post_picture(app, match_info, message, photo_task)
+        html = _post_html(app, post, record, match_info, match_events,
+                          with_photo=photo is not None, credit=credit)
+        try:
+            await message.reply_rich(rich_message=rich_message(html, photo), reply_markup=keyboard)
+        except TelegramBadRequest as exc:
+            log.warning("Telegram не принял rich-пост (%s) — отправляю обычным сообщением",
+                        exc.message)
+        else:
+            with contextlib.suppress(TelegramBadRequest):
+                await target.delete()
+            return
         if photo is not None:
             try:
                 await message.reply_photo(
@@ -407,15 +428,43 @@ def _with_credit(signature: str, credit: str) -> str:
 
 async def _set_text(message: Message, text: str,
                     markup: InlineKeyboardMarkup | None = None) -> None:
-    """Replace the text of a message, or its caption when it is a photo."""
+    """Replace the text of a message, or its caption when it is a photo.
+
+    A rich post keeps its content (its photo would be lost otherwise): only its buttons
+    change, and an error is sent as a separate reply."""
     try:
-        if message.photo:
+        if message.rich_message is not None:
+            await message.edit_reply_markup(reply_markup=markup)
+            if text.startswith("⚠️"):
+                await message.reply(text)
+        elif message.photo:
             await message.edit_caption(caption=text, reply_markup=markup)
         else:
             await message.edit_text(text, reply_markup=markup, link_preview_options=NO_PREVIEW)
     except TelegramBadRequest as exc:
         if "not modified" not in exc.message.lower():
             log.warning("Не удалось обновить сообщение: %s", exc.message)
+
+
+def _progress_keyboard() -> InlineKeyboardMarkup:
+    """Shown under a rich post while its new version is being written."""
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="✍️ Пишу другой вариант…", callback_data=NewsAction(action="noop", item="-").pack())]])
+
+
+def _post_html(app: App, post: Post, record: NewsRecord | None, match_info, match_events, *,
+               with_photo: bool, credit: str) -> str:
+    """The rich-message HTML of a post (see :mod:`bot.rich`)."""
+    signature = app.config.post_signature
+    if match_info is not None and match_events is not None:
+        return match_html(post.text, *match_info, match_events, tz=app.config.tz,
+                          signature=signature, with_photo=with_photo)
+    source = None
+    if record is not None and app.config.post_source_button:
+        site = SOURCE_BY_KEY.get(record.source)
+        source = (site.name if site else record.source, record.url)
+    return news_html(post.text, signature=signature, with_photo=with_photo, credit=credit,
+                     source=source)
 
 
 def _first_url(message: Message) -> str | None:
