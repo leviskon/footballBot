@@ -42,6 +42,7 @@ class Config:
     groq_models: tuple[str, ...] = ()
     post_signature: str = ""
     card_brand: str = ""
+    channel_id: int | str | None = None  # «@username» or «-100…»
 
 
 def _env(name: str) -> str:
@@ -126,6 +127,20 @@ def _list_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return items or default
 
 
+def _parse_channel(raw: str) -> int | str | None:
+    """«@futera», «futera», «https://t.me/futera» → "@futera"; «-1001234567890» → the int."""
+    if not raw:
+        return None
+    if re.fullmatch(r"-100\d{5,}", raw):
+        return int(raw)
+    match = re.fullmatch(r"(?:https?://)?(?:t\.me/|telegram\.me/)?@?([A-Za-z][A-Za-z0-9_]{3,31})/?",
+                         raw)
+    if not match:
+        raise ConfigError("CHANNEL_ID: укажи @username канала или его ID вида -1001234567890 "
+                          "(ID пришлёт бот, если переслать ему любой пост из канала)")
+    return "@" + match.group(1)
+
+
 def _path_env(name: str, default: str) -> Path:
     path = Path(_env(name) or default)
     return path if path.is_absolute() else BASE_DIR / path
@@ -173,4 +188,5 @@ def load_config(*, require_token: bool = True) -> Config:
         groq_models=_list_env("GROQ_MODELS", DEFAULT_GROQ_MODELS),
         post_signature=_env("POST_SIGNATURE").replace("\\n", "\n"),
         card_brand=_env("CARD_BRAND"),
+        channel_id=_parse_channel(_env("CHANNEL_ID")),
     )

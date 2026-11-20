@@ -158,6 +158,8 @@ async def status(app: App) -> str:
         f"Языки источников: {esc(', '.join(langs)) or 'все выключены'}",
         f"Посты пишет: {esc(' → '.join(app.writer.provider_names))}"
         if app.writer is not None else "Посты: нейросеть не подключена (нет ключа в .env)",
+        f"Канал для публикации: {esc(app.channel.name)}" if app.channel is not None
+        else "Канал для публикации: не подключён (CHANNEL_ID в .env)",
         f"Итоги матчей: {'вкл' if settings.results else 'выкл'} · "
         f"Анонс дня: {app.config.digest_time.strftime('%H:%M') if settings.digest else 'выкл'} "
         f"({esc(app.config.tz_name)})",

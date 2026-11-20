@@ -19,6 +19,7 @@ from aiogram.types import BotCommand, InlineKeyboardMarkup, User
 
 from .access import Access
 from .cardmaker import CardMaker
+from .channel import Channel
 from .photos import PhotoFinder
 from .catalog import Category
 from .classifier import Classifier
@@ -67,6 +68,7 @@ class App:
                                     digest_time=config.digest_time)
         self.writer = make_writer(config, http)
         self.photos = PhotoFinder(http, db)
+        self.channel = Channel(bot, config.channel_id) if config.channel_id else None
         self.cards = CardMaker(http, db, self.writer, self.photos, brand=config.card_brand)
         self.started_at = time.time()
         self.bot_username = ""
@@ -263,6 +265,12 @@ class App:
         self.start_background()
         if self.access.recipients:
             log.info("Получатели: %s", ", ".join(map(str, self.access.recipients)))
+        if self.channel is not None:
+            problem = await self.channel.check()
+            if problem:
+                log.warning("Кнопка «В канал» не будет работать: %s", problem)
+            else:
+                log.info("Посты публикуются в канал %s", self.channel.name)
         if self.writer is not None:
             log.info("Посты пишет: %s", " → ".join(self.writer.provider_names))
         else:

@@ -50,7 +50,7 @@ class NewsAction(CallbackData, prefix="n"):
     # "take" | "del" | "noop" — news buttons;
     # "post" — write a post about news ``item``; "mpost" — about ESPN match ``item`` ("0" in
     # older messages: the result text of this message); "repost" / "rempost" — another
-    # version of the post in this message.
+    # version of the post in this message; "pub" — copy this post to the channel.
     action: str
     item: str
 
@@ -89,16 +89,30 @@ def match_keyboard(match_id: str) -> InlineKeyboardMarkup:
         text=POST_BUTTON, callback_data=NewsAction(action="mpost", item=match_id).pack())]])
 
 
-def post_keyboard(*, news_id: str | None = None,
-                  match_id: str | None = None) -> InlineKeyboardMarkup:
-    """Under a written post: another version of it. Without ids it is a post about a match
-    from an older message, whose result text the post replies to."""
+def post_keyboard(*, news_id: str | None = None, match_id: str | None = None,
+                  publish: bool = False) -> InlineKeyboardMarkup:
+    """Under a written post: another version of it and, when a channel is set up,
+    «📢 В канал». Without ids it is a post about a match from an older message, whose result
+    text the post replies to."""
     if news_id:
         action = NewsAction(action="repost", item=news_id)
     else:
         action = NewsAction(action="rempost", item=match_id or "0")
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="🔄 Другой вариант", callback_data=action.pack())]])
+    row = [InlineKeyboardButton(text="🔄 Другой вариант", callback_data=action.pack())]
+    if publish:
+        row.append(InlineKeyboardButton(
+            text="📢 В канал", callback_data=NewsAction(action="pub", item="-").pack()))
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+def published_keyboard(link: str | None) -> InlineKeyboardMarkup:
+    """Under a post that is already in the channel."""
+    if link:
+        button = InlineKeyboardButton(text="✅ Опубликовано — открыть", url=link)
+    else:
+        button = InlineKeyboardButton(
+            text="✅ Опубликовано", callback_data=NewsAction(action="noop", item="-").pack())
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
 
 def _mark(enabled: bool) -> str:

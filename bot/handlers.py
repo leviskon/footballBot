@@ -12,7 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject, CommandStart, Filter, or_f
 from aiogram.types import (
     BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message,
@@ -22,7 +22,8 @@ from aiogram.types import (
 from . import texts
 from .catalog import ALL_CATEGORY_KEYS, CATEGORY_BY_KEY
 from .keyboards import (
-    REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, post_keyboard, settings_keyboard,
+    REMOVE_MENU, Btn, NewsAction, SettingsAction, main_menu, post_keyboard, published_keyboard,
+    settings_keyboard,
 )
 from .notifier import DeliveryError
 from .render import fit_post, render_day, render_post, render_result
@@ -43,6 +44,8 @@ NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 # Messages a post is being written for right now (a second tap must not start another one).
 _writing: set[tuple[int, int]] = set()
+# Posts being copied to the channel right now (a double tap must not publish twice).
+_publishing: set[tuple[int, int]] = set()
 
 
 class AdminFilter(Filter):
@@ -181,6 +184,16 @@ async def do_resume(message: Message, app: App) -> None:
 
 
 async def unknown_message(message: Message, app: App) -> None:
+    origin = message.forward_origin
+    if origin is not None and getattr(origin, "type", None) == "channel":
+        # a post forwarded from a channel: tell its id, needed for CHANNEL_ID
+        chat = origin.chat
+        value = f"@{chat.username}" if chat.username else str(chat.id)
+        await message.answer(
+            f"📢 Канал «{esc(chat.title or '')}»\nID: <code>{chat.id}</code>\n\n"
+            f"Чтобы бот публиковал в него посты, добавь в .env строку:\n"
+            f"<code>CHANNEL_ID={esc(value)}</code>", reply_markup=await _menu(app))
+        return
     await message.answer("Пользуйся кнопками внизу экрана 👇", reply_markup=await _menu(app))
 
 
@@ -207,6 +220,8 @@ async def on_news_action(callback: CallbackQuery, callback_data: NewsAction, app
                                   "Кнопки убрал — удали вручную.", show_alert=True)
     elif callback_data.action in POST_ACTIONS:
         await _write_post(callback, message, callback_data, app)
+    elif callback_data.action == "pub":
+        await _publish(callback, message, app)
     else:
         await callback.answer()
 
@@ -265,7 +280,9 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         async def write() -> Post:
             return Post(await writer.match_post(result_text))
 
-    keyboard = post_keyboard(news_id=news_id, match_id=match_id)
+    keyboard = post_keyboard(news_id=news_id, match_id=match_id,
+                             publish=app.channel is not None)
+    retry = post_keyboard(news_id=news_id, match_id=match_id)  # for error messages
     _writing.add(key)
     try:
         if match_id is None:
@@ -289,14 +306,14 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
             log.warning("Не удалось написать пост: %s", exc)
             await _set_text(target, "⚠️ Не получилось написать пост: нейросети сейчас "
                             "перегружены или закончился бесплатный лимит. Попробуй через "
-                            "пару минут.", keyboard)
+                            "пару минут.", retry)
             return
         except Exception:
             if photo_task is not None:
                 photo_task.cancel()
             log.exception("Ошибка при написании поста")
             await _set_text(target, "⚠️ Не получилось написать пост из-за ошибки. "
-                            "Подробности — в logs/bot.log", keyboard)
+                            "Подробности — в logs/bot.log", retry)
             return
 
         signature = app.config.post_signature
@@ -323,6 +340,40 @@ async def _write_post(callback: CallbackQuery, message: Message, data: NewsActio
         await _set_text(target, render_post(post.text, signature), keyboard)
     finally:
         _writing.discard(key)
+
+
+async def _publish(callback: CallbackQuery, message: Message, app: App) -> None:
+    """«📢 В канал»: copy the written post (photo and caption, no buttons) to the channel."""
+    channel = app.channel
+    if channel is None:
+        await callback.answer("Канал не подключён: добавь CHANNEL_ID в .env и перезапусти бота.",
+                              show_alert=True)
+        return
+    key = (message.chat.id, message.message_id)
+    if key in _publishing:
+        await callback.answer("Уже публикую…")
+        return
+    _publishing.add(key)
+    try:
+        try:
+            channel_message = await channel.publish(message.chat.id, message.message_id)
+        except TelegramForbiddenError:
+            await callback.answer("Бот не может писать в канал: проверь, что он администратор "
+                                  "с правом «Публикация сообщений».", show_alert=True)
+            return
+        except TelegramAPIError as exc:
+            log.warning("Не удалось опубликовать в канал %s: %s", channel.name, exc)
+            hint = (" Проверь CHANNEL_ID в .env." if "chat not found" in str(exc).lower()
+                    else "")
+            await callback.answer(f"Telegram не дал опубликовать: {exc}.{hint}"[:190],
+                                  show_alert=True)
+            return
+        link = channel.link(channel_message)
+        log.info("Пост опубликован в канале %s: %s", channel.name, link or channel_message)
+        await _edit_markup(message, published_keyboard(link))
+        await callback.answer("Опубликовано в канале ✅")
+    finally:
+        _publishing.discard(key)
 
 
 async def _post_picture(app: App, match_info, message: Message,
