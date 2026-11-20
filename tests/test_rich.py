@@ -14,7 +14,7 @@ def test_news_html_structure_and_escaping():
                      credit="📷 Zafer / Wikimedia", source=("Чемпионат", "https://x.example/a?b=1&c=2"))
     assert html.startswith('<figure><img src="tg://photo?id=hero"><figcaption>📷 Zafer / Wikimedia'
                            "</figcaption></figure><h2>❗️ «РЕАЛ» &amp; «БАРСЕЛОНА» &lt;СПОРЯТ&gt;</h2>"
-                           "<p>&nbsp;</p>")
+                           "<p>Первый абзац.</p>")
     assert "<p>Первый абзац.</p><p>Вторая строка.</p>" in html
     assert "<blockquote><p>«Короткая цитата»</p><cite>Моуринью</cite></blockquote>" in html
     assert "<blockquote expandable>«Очень длинная цитата." in html
@@ -24,7 +24,7 @@ def test_news_html_structure_and_escaping():
 
 def test_news_html_without_photo_or_source():
     html = news_html("ЗАГОЛОВОК\nТекст")
-    assert html == "<h2>ЗАГОЛОВОК</h2><p>&nbsp;</p><p>Текст</p>"
+    assert html == "<h2>ЗАГОЛОВОК</h2><p>Текст</p>"
 
 
 def test_match_html_has_a_goal_table_and_local_time():

@@ -76,8 +76,9 @@ def _footer(signature: str) -> str:
 
 
 def _heading(headline: str) -> str:
-    """The headline with an empty line under it, like a blank line in a plain post."""
-    return f"<h2>{esc(headline)}</h2>{SPACER}"
+    """The headline (Telegram's own margin under a heading is enough: the channel owner
+    found any extra empty line too big)."""
+    return f"<h2>{esc(headline)}</h2>"
 
 
 def _buttons(buttons: Sequence[tuple[str, str, str | None]]) -> str:
