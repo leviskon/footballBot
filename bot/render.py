@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, tzinfo
 
 from .catalog import CATEGORY_BY_KEY, ENTITY_BY_NAME, EXTRA_TEAM_NAMES, CATEGORIES, Category
@@ -171,12 +172,125 @@ def render_day(day: date, groups: Sequence[tuple[Category, Sequence[Match]]], tz
 
 # ------------------------------------------------------------------------ posts
 
-def render_post(post: str, signature: str = "") -> str:
-    """A written channel post: the headline in bold, the channel signature at the end."""
+#
+# The model writes plain text with two marks (see ``writer.STYLE``):
+#   **ключевой факт**          — bold;
+#   > «Цитата»  /  > — Автор    — a quote and who said it.
+# A whole paragraph in «quotes» followed by «— Автор» is a quote too (older prompt).
+
+LONG_QUOTE = 250  # quotes longer than this are collapsed («expandable»)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_DASHES = "—–-"
+_OPEN_QUOTES, _CLOSE_QUOTES = "«\"“„", "»\"”"
+# «Текст цитаты» — Автор   /   "Quote" - Author
+_QUOTE_RE = re.compile(r"^[«\"“](?P<text>.+)[»\"”](?:\s*[—–-]\s*(?P<credit>.{2,80}))?$", re.DOTALL)
+
+
+@dataclass(frozen=True, slots=True)
+class Block:
+    """A paragraph of a post (each line is shown on its own line) or a quote."""
+
+    lines: tuple[str, ...]
+    quote: bool = False
+    credit: str = ""
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.lines)
+
+
+def strip_marks(text: str) -> str:
+    return text.replace("**", "")
+
+
+def inline_html(text: str) -> str:
+    """Escape a line and turn ``**…**`` into bold (unpaired marks are dropped)."""
+    return strip_marks(_BOLD_RE.sub(r"<b>\1</b>", esc(text)))
+
+
+def _unquote(text: str) -> str:
+    """«Цитата» → Цитата (only when the outer marks are a pair: not «Реал» … «Барсы»)."""
+    if len(text) > 2 and text[0] in _OPEN_QUOTES and text[-1] in _CLOSE_QUOTES:
+        inner = text[1:-1].strip()
+        depth = 0
+        for char in inner:
+            depth += (char == "«") - (char == "»")
+            if depth < 0:
+                return text
+        if depth == 0 and inner.count('"') % 2 == 0:
+            return inner
+    return text
+
+
+def _quote_block(lines: list[str]) -> Block:
+    credit = ""
+    if len(lines) > 1 and lines[-1][0] in _DASHES:
+        credit = lines.pop().lstrip(_DASHES + " ").strip()
+    text = _unquote(strip_marks(" ".join(lines)).strip())
+    text = text.replace("«", "„").replace("»", "“")  # quotes inside the «quote»
+    return Block((text,), quote=True, credit=strip_marks(credit))
+
+
+def _text_block(lines: list[str]) -> Block:
+    old_style = _QUOTE_RE.match(" ".join(lines))
+    if old_style:
+        return Block((strip_marks(old_style["text"].strip()),), quote=True,
+                     credit=strip_marks((old_style["credit"] or "").strip()))
+    return Block(tuple(lines))
+
+
+def parse_post(post: str) -> tuple[str, list[Block]]:
+    """Headline (without marks) and blocks of a written post."""
     headline, _, body = post.strip().partition("\n")
-    text = f"<b>{esc(headline.strip())}</b>"
-    if body.strip():
-        text += "\n" + esc(body.rstrip())  # keeps the blank line after the headline, if any
+    blocks: list[Block] = []
+    lines: list[str] = []
+    quote: list[str] | None = None
+
+    def close() -> None:
+        nonlocal lines, quote
+        if quote:
+            blocks.append(_quote_block(quote))
+        elif lines:
+            blocks.append(_text_block(lines))
+        lines, quote = [], None
+
+    for raw in body.split("\n"):
+        line = raw.strip()
+        if not line:
+            close()
+        elif line.startswith(">"):
+            if quote is None:
+                close()
+                quote = []
+            text = line.lstrip("> ").strip()
+            if text:
+                quote.append(text)
+        elif quote and line[0] in _DASHES and quote[-1][0] not in _DASHES:
+            quote.append(line)  # «— Автор» written right under the quote without «>»
+        else:
+            if quote is not None:
+                close()
+            lines.append(line)
+    close()
+    return strip_marks(headline).strip(), blocks
+
+
+def _block_html(block: Block) -> str:
+    """A block in Telegram's ordinary HTML (photo captions, text messages)."""
+    if block.quote:
+        tag = "blockquote expandable" if len(block.text) > LONG_QUOTE else "blockquote"
+        credit = f"\n— {esc(block.credit)}" if block.credit else ""
+        return f"<{tag}>«{esc(block.text)}»{credit}</blockquote>"
+    return "\n".join(inline_html(line) for line in block.lines)
+
+
+def render_post(post: str, signature: str = "") -> str:
+    """A written channel post: the headline in bold, bold facts and quotes, the channel
+    signature at the end."""
+    headline, blocks = parse_post(post)
+    text = f"<b>{esc(headline)}</b>"
+    if blocks:
+        text += "\n\n" + "\n\n".join(_block_html(block) for block in blocks)
     if signature.strip():
         text += f"\n\n\n{esc(signature.strip())}"
     return truncate(text, MESSAGE_LIMIT) if len(text) > MESSAGE_LIMIT else text

@@ -18,9 +18,6 @@ class FakeMessage:
         self.message_id = FakeMessage._next_id
         self.chat = SimpleNamespace(id=1)
         self.text, self.caption, self.photo = text, None, photo
-        self.rich_message = None
-        self.rich_html = None  # what the bot sent as a rich post
-        self.rich_photo = None
         self.reply_to_message = reply_to
         self.replies: list[FakeMessage] = []
         self.deleted = False
@@ -37,31 +34,8 @@ class FakeMessage:
         self.replies.append(message)
         return message
 
-    async def reply_rich(self, rich_message, reply_markup=None, **kwargs):
-        message = FakeMessage(reply_to=self)
-        message.markup = reply_markup
-        message.rich_html = rich_message.html
-        message.rich_photo = rich_message.media[0].media.media if rich_message.media else None
-        photo = [SimpleNamespace(file_id="photo-file-id")] if rich_message.media else None
-        caption = None
-        if 'figcaption>' in rich_message.html:
-            caption = SimpleNamespace(text=rich_message.html.split("<figcaption>")[1]
-                                      .split("</figcaption>")[0])
-        blocks = [SimpleNamespace(type="photo", photo=photo, caption=caption)] if photo else []
-        message.rich_message = SimpleNamespace(blocks=blocks)
-        self.replies.append(message)
-        return message
-
-    async def edit_text(self, text=None, reply_markup=None, rich_message=None, **kwargs):
-        if rich_message is not None:
-            self.rich_html = rich_message.html
-            self.rich_photo = rich_message.media[0].media.media if rich_message.media else None
-        else:
-            self.text = text
-        self.markup = reply_markup
-
-    async def edit_reply_markup(self, reply_markup=None, **kwargs):
-        self.markup = reply_markup
+    async def edit_text(self, text, reply_markup=None, **kwargs):
+        self.text, self.markup = text, reply_markup
 
     async def edit_caption(self, caption=None, reply_markup=None, **kwargs):
         self.caption, self.markup = caption, reply_markup
@@ -108,35 +82,30 @@ def make_app(*, fail=False, photo=b"\xff\xd8jpeg", related=None, credit=False, c
 
     return SimpleNamespace(writer=Writer(), db=Db(), photos=Photos(), cards=None, matches=None,
                            channel=channel,
-                           config=SimpleNamespace(post_signature="⚽️ FUTERA", post_source_button=False,
-                                                  tz=None))
+                           config=SimpleNamespace(post_signature="⚽️ FUTERA"))
 
 
-def test_news_post_is_a_rich_message_rewritten_in_place():
+def test_news_post_is_sent_as_a_photo_and_rewritten_in_place():
     app = make_app()
     news = FakeMessage("новость")
     asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
     placeholder, post = news.replies
     assert placeholder.deleted
-    assert post.rich_photo.filename == "photo.jpg"
-    assert post.rich_html.startswith('<img src="tg://photo?id=hero"><h2>🚨 ВАРИАНТ 1</h2>')
-    assert "<p>&nbsp;</p><footer>⚽️ FUTERA</footer>" in post.rich_html
-    assert "<tg-button" not in post.rich_html  # no «🔗 Источник» button unless switched on
+    assert post.sent_photo.filename == "photo.jpg"
+    assert post.caption.startswith("<b>🚨 ВАРИАНТ 1</b>") and post.caption.endswith("FUTERA")
     assert NewsAction.unpack(post.markup.inline_keyboard[0][0].callback_data) == \
         NewsAction(action="repost", item="n1")
 
     asyncio.run(_write_post(FakeCallback(), post, NewsAction(action="repost", item="n1"), app))
-    assert "<h2>🚨 ВАРИАНТ 2</h2>" in post.rich_html
-    assert post.rich_photo == "photo-file-id"  # the same photo, reused by its file id
+    assert post.caption.startswith("<b>🚨 ВАРИАНТ 2</b>")  # same photo, new text
 
 
-def test_without_a_photo_the_post_is_rich_text():
+def test_without_a_photo_the_post_is_text():
     app = make_app(photo=None)
     news = FakeMessage("новость")
     asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
-    placeholder, post = news.replies
-    assert placeholder.deleted and post.rich_html.startswith("<h2>🚨 ВАРИАНТ 1</h2>")
-    assert post.rich_photo is None
+    [placeholder] = news.replies
+    assert not placeholder.deleted and placeholder.text.startswith("<b>🚨 ВАРИАНТ 1</b>")
 
 
 def test_llm_failure_is_reported():
@@ -163,7 +132,7 @@ def test_photo_of_the_same_story_from_another_site():
     news = FakeMessage("новость")
     asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
     placeholder, post = news.replies
-    assert placeholder.deleted and post.rich_photo.data == b"\xff\xd8other"
+    assert placeholder.deleted and post.sent_photo.data == b"\xff\xd8other"
 
 
 def test_wikipedia_credit_is_kept_in_every_version():
@@ -171,23 +140,11 @@ def test_wikipedia_credit_is_kept_in_every_version():
     news = FakeMessage("новость")
     asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
     post = news.replies[1]
-    credit = "<figcaption>📷 Zafer / Wikimedia Commons, CC BY 4.0</figcaption>"
-    assert credit in post.rich_html
+    assert post.caption.endswith("FUTERA\n📷 Zafer / Wikimedia Commons, CC BY 4.0")
+    post.caption = "🚨 ВАРИАНТ 1\n\nТекст.\n\n\n⚽️ FUTERA\n📷 Zafer / Wikimedia Commons, CC BY 4.0"
     asyncio.run(_write_post(FakeCallback(), post, NewsAction(action="repost", item="n1"), app))
-    assert "<h2>🚨 ВАРИАНТ 2</h2>" in post.rich_html and credit in post.rich_html
-
-
-def test_rich_post_rewrite_failure_keeps_the_post():
-    app = make_app()
-    news = FakeMessage("новость")
-    asyncio.run(_write_post(FakeCallback(), news, NewsAction(action="post", item="n1"), app))
-    post = news.replies[1]
-    html = post.rich_html
-    app.writer.news_post = make_app(fail=True).writer.news_post
-    asyncio.run(_write_post(FakeCallback(), post, NewsAction(action="repost", item="n1"), app))
-    assert post.rich_html == html  # the post and its photo are untouched
-    assert post.replies[0].text.startswith("⚠️ Не получилось")
-    assert post.markup.inline_keyboard[0][0].text == "🔄 Другой вариант"
+    assert post.caption.startswith("<b>🚨 ВАРИАНТ 2</b>")
+    assert post.caption.endswith("📷 Zafer / Wikimedia Commons, CC BY 4.0")
 
 
 class FakeChannel:

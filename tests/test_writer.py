@@ -68,6 +68,21 @@ def test_render_post_bold_headline_and_signature():
     assert render_post("ЗАГОЛОВОК") == "<b>ЗАГОЛОВОК</b>"
 
 
+def test_render_post_bold_and_quote():
+    text = render_post("🚨 ЗАГОЛОВОК\n\n💰 Сумма — **100 млн €**.\n\n> «Цитата»\n> — Автор", "FUTERA")
+    assert text == ("<b>🚨 ЗАГОЛОВОК</b>\n\n💰 Сумма — <b>100 млн €</b>.\n\n"
+                    "<blockquote>«Цитата»\n— Автор</blockquote>\n\n\nFUTERA")
+
+
+def test_clean_post_keeps_short_bold_and_quote_lines():
+    raw = ("**🚨 ЗАГОЛОВОК**\n\n💰 Сумма — ** 100 млн € **, *курсив*.\n\n"
+           "**" + "Целое предложение жирным, которое выделять не надо совсем никак. " + "**\n\n"
+           "> «Цитата»\n> — Автор")
+    assert clean_post(raw) == ("🚨 ЗАГОЛОВОК\n\n💰 Сумма — **100 млн €**, курсив.\n\n"
+                               "Целое предложение жирным, которое выделять не надо совсем никак.\n\n"
+                               "> «Цитата»\n> — Автор")
+
+
 def test_falls_back_to_the_next_provider():
     busy = FakeProvider("Gemini", error="HTTP 503 overloaded")
     groq = FakeProvider("Groq", answer="❗️ ПОСТ\n\nТекст.")
@@ -203,3 +218,28 @@ def test_quick_answer_asks_nobody_else(monkeypatch):
     second = SlowProvider("Second", "ДРУГОЙ", delay=0.01)
     assert asyncio.run(PostWriter(FakeHttp(), [first, second]).news_post(RECORD)).text == "ПОСТ"
     assert second.prompts == []
+
+
+def test_render_post_quotes_bold_and_escaping():
+    post = ("🚨 **МУСИАЛУ** МОГУТ ПРОДАТЬ\n\n"
+            "💰 «Бавария» допускает продажу **Мусиалы** & <не только>.\n\n"
+            "> «Это нельзя исключать. **Мы** подозреваем…»\n"
+            "> — Карл-Хайнц Румменигге, Sky Sports\n"
+            "🩺 Диагноз — **абсансы**.\n"
+            "Строка с непарной ** звёздочкой.\n\n"
+            "«Старая цитата» — Моуринью\n\n"
+            "> «" + "Очень длинная цитата. " * 15 + "»")
+    assert render_post(post) == (
+        "<b>🚨 МУСИАЛУ МОГУТ ПРОДАТЬ</b>\n\n"
+        "💰 «Бавария» допускает продажу <b>Мусиалы</b> &amp; &lt;не только&gt;.\n\n"
+        "<blockquote>«Это нельзя исключать. Мы подозреваем…»\n"
+        "— Карл-Хайнц Румменигге, Sky Sports</blockquote>\n\n"
+        "🩺 Диагноз — <b>абсансы</b>.\nСтрока с непарной  звёздочкой.\n\n"
+        "<blockquote>«Старая цитата»\n— Моуринью</blockquote>\n\n"
+        "<blockquote expandable>«" + ("Очень длинная цитата. " * 15).strip() + "»</blockquote>")
+
+
+def test_quote_credit_without_mark_and_inner_quotes():
+    assert render_post("ЗАГОЛОВОК\n\n> «Реал» сильнее, чем «Барселона»\n— Анчелотти") == (
+        "<b>ЗАГОЛОВОК</b>\n\n<blockquote>«„Реал“ сильнее, чем „Барселона“»\n— Анчелотти"
+        "</blockquote>")
